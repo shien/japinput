@@ -13,10 +13,14 @@ This file provides guidance for AI assistants (including Claude Code) working in
 
 ```
 japinput/
-├── Cargo.toml       # Rust package manifest
+├── Cargo.toml         # Rust package manifest
 ├── src/
-│   ├── lib.rs       # Crate root (module declarations)
-│   └── romaji.rs    # ローマ字 → ひらがな変換
+│   ├── lib.rs         # Crate root (module declarations)
+│   ├── romaji.rs      # ローマ字 → ひらがな変換
+│   ├── katakana.rs    # ひらがな → カタカナ変換
+│   ├── input_state.rs # 入力状態管理 (逐次入力)
+│   └── main.rs        # CLI デモ
+├── plan/              # 開発計画ドキュメント
 ├── LICENSE
 └── CLAUDE.md
 ```
@@ -40,6 +44,7 @@ cargo build
 | `cargo clippy` | lint チェックを実行する |
 | `cargo fmt` | コードをフォーマットする |
 | `cargo fmt -- --check` | フォーマット差分があるかチェックする（CI向け） |
+| `cargo run` | CLI デモを起動する（ローマ字→かな変換） |
 
 ## Code Conventions
 
