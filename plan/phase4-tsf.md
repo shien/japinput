@@ -27,6 +27,10 @@ TSF は Windows の入力メソッドフレームワーク。IME は COM DLL と
 - [ ] `[lib]` セクションで `crate-type = ["cdylib", "rlib"]` を設定
 - [ ] GUID の生成（IME 識別用の CLSID, Profile GUID）
 
+**動作確認:**
+- `cargo build` がエラーなく完了すること
+- `cargo test` で既存テストが引き続きパスすること
+
 ### 4.2 COM DLL エントリポイント
 
 - [ ] `src/lib.rs` に DLL エクスポート関数:
@@ -36,12 +40,19 @@ TSF は Windows の入力メソッドフレームワーク。IME は COM DLL と
 - [ ] `ClassFactory` の実装 (`IClassFactory`)
 - [ ] テスト: COM オブジェクトの生成
 
+**動作確認:**
+- `cargo test` で COM オブジェクト生成のユニットテストがパスすること
+- `cargo build` で DLL (`cdylib`) が生成されること
+
 ### 4.3 ITfTextInputProcessor の実装
 
 - [ ] `TextService` 構造体
 - [ ] `Activate` / `Deactivate`: IME の有効化・無効化
 - [ ] `ITfThreadMgrEventSink`: スレッドマネージャイベント
 - [ ] テスト: Activate/Deactivate のライフサイクル
+
+**動作確認:**
+- `cargo test` で Activate/Deactivate ライフサイクルのテストがパスすること
 
 ### 4.4 キーイベント処理
 
@@ -51,6 +62,10 @@ TSF は Windows の入力メソッドフレームワーク。IME は COM DLL と
 - [ ] Phase 3 の `ConversionEngine` と接続
 - [ ] テスト: キーイベントからエンジンへの変換
 
+**動作確認:**
+- `cargo test` でキーイベント処理のユニットテストがパスすること
+- キーイベント → `EngineCommand` への変換が正しいことをテストで確認
+
 ### 4.5 Composition 管理
 
 - [ ] `ITfCompositionSink` の実装
@@ -58,11 +73,19 @@ TSF は Windows の入力メソッドフレームワーク。IME は COM DLL と
 - [ ] 確定テキストの挿入
 - [ ] テスト: Composition の開始・更新・終了
 
+**動作確認:**
+- `cargo test` で Composition ライフサイクル（開始・更新・終了）のテストがパスすること
+
 ### 4.6 登録スクリプト
 
 - [ ] `regsvr32` での登録/解除手順
 - [ ] PowerShell スクリプトで簡易インストール
 - [ ] 動作確認手順のドキュメント
+
+**動作確認:**
+- Windows 環境で `regsvr32 japinput.dll` が成功すること
+- Windows の設定 → 入力メソッド一覧に japinput が表示されること
+- メモ帳でローマ字→ひらがな変換が動作することを手動確認
 
 ## 完了条件
 
