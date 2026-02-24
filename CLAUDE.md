@@ -4,7 +4,7 @@ This file provides guidance for AI assistants (including Claude Code) working in
 
 ## Project Overview
 
-**japinput** is a Japanese input project. The repository is in its early stages of development.
+**japinput** is a Windows 向け日本語入力システム (IME) written in Rust.
 
 - **License:** MIT (Copyright 2026 shien)
 - **Default branch:** `main`
@@ -13,40 +13,72 @@ This file provides guidance for AI assistants (including Claude Code) working in
 
 ```
 japinput/
-├── LICENSE          # MIT license
-└── CLAUDE.md        # This file — AI assistant guide
+├── Cargo.toml       # Rust package manifest
+├── src/
+│   ├── lib.rs       # Crate root (module declarations)
+│   └── romaji.rs    # ローマ字 → ひらがな変換
+├── LICENSE
+└── CLAUDE.md
 ```
-
-This is a newly initialized repository. As the project grows, update this section to reflect the directory layout.
 
 ## Development Setup
 
-No build system, dependencies, or tooling have been configured yet. When they are added, document the setup steps here:
-
 ```sh
-# Example (update when applicable):
-# git clone <repo-url>
-# cd japinput
-# <install dependencies command>
-# <build command>
+git clone <repo-url>
+cd japinput
+cargo build
 ```
 
 ## Common Commands
 
-No commands are configured yet. As scripts are added (e.g., in `package.json`, `Makefile`, or similar), list them here:
-
 | Command | Description |
 |---------|-------------|
-| _TBD_   | _TBD_       |
+| `cargo build` | プロジェクトをビルドする |
+| `cargo test` | 全テストを実行する |
+| `cargo test -- --nocapture` | テスト実行時に stdout を表示する |
+| `cargo test <test_name>` | 特定のテストのみ実行する |
+| `cargo clippy` | lint チェックを実行する |
+| `cargo fmt` | コードをフォーマットする |
+| `cargo fmt -- --check` | フォーマット差分があるかチェックする（CI向け） |
 
 ## Code Conventions
 
-No code has been written yet. When development begins, document:
+- **Language:** Rust (Edition 2024)
+- **Formatting:** `rustfmt` (デフォルト設定)
+- **Linting:** `clippy`
+- **Testing:** `cargo test` (Rust 標準のテストフレームワーク)
 
-- **Language(s):** _(e.g., TypeScript, Rust, Python)_
-- **Formatting/Linting:** _(e.g., Prettier, ESLint, rustfmt)_
-- **Testing framework:** _(e.g., Jest, pytest, cargo test)_
-- **Style guide:** _(any project-specific conventions)_
+## Testing Rules
+
+以下のルールに従ってテストを書くこと。
+
+### テスト実行
+
+- コードを変更したら `cargo test` で全テストが通ることを必ず確認する。
+- テストが失敗した状態でコミットしてはならない。
+
+### テストの配置
+
+- **ユニットテスト**は、対象モジュールと同じファイル内の `#[cfg(test)] mod tests { ... }` ブロックに書く。
+- **結合テスト**（将来必要になった場合）は `tests/` ディレクトリに配置する。
+
+### テストの書き方
+
+- テスト関数名は `snake_case` で、テスト対象の挙動を簡潔に表す名前にする。
+  - 良い例: `fn sokuon_kk()`, `fn n_before_consonant()`
+  - 悪い例: `fn test1()`, `fn it_works()`
+- テストはカテゴリごとにコメントで区切る（例: `// === 促音（っ） ===`）。
+- `assert_eq!` を基本とし、期待値を右辺に書く: `assert_eq!(actual, expected)`。
+- 新しい機能を追加するときは、最低限以下のテストを含める:
+  - 正常系（基本的な入力）
+  - エッジケース（空入力、境界値など）
+  - 既知の特殊ケース（その機能固有の注意点）
+
+### テスト追加のタイミング
+
+- 新しい public 関数には必ずテストを書く。
+- バグを修正するときは、そのバグを再現するテストを先に書く（回帰テスト）。
+- 変換テーブルにエントリを追加したら、対応するテストも追加する。
 
 ## Git Workflow
 
@@ -62,4 +94,5 @@ No code has been written yet. When development begins, document:
 - **Preserve existing conventions.** Match the style, formatting, and patterns already present in the codebase.
 - **No unnecessary files.** Do not create documentation, config files, or boilerplate unless explicitly asked.
 - **Security first.** Do not introduce command injection, XSS, SQL injection, or other common vulnerabilities.
+- **Run tests.** Before committing, always run `cargo test` and confirm all tests pass.
 - **Update this file.** When new tooling, structure, or conventions are added to the project, update this CLAUDE.md to reflect the current state.
