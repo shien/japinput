@@ -13,13 +13,18 @@ This file provides guidance for AI assistants (including Claude Code) working in
 
 ```
 japinput/
-├── Cargo.toml         # Rust package manifest
+├── Cargo.toml         # Rust package manifest (encoding_rs)
 ├── src/
 │   ├── lib.rs         # Crate root (module declarations)
 │   ├── romaji.rs      # ローマ字 → ひらがな変換
 │   ├── katakana.rs    # ひらがな → カタカナ変換
 │   ├── input_state.rs # 入力状態管理 (逐次入力)
-│   └── main.rs        # CLI デモ
+│   ├── dictionary.rs  # SKK 辞書読み込み・検索
+│   └── main.rs        # CLI デモ (辞書検索対応)
+├── tests/
+│   └── fixtures/
+│       └── test_dict.txt  # テスト用 SKK 辞書
+├── dict/              # 辞書ファイル配置先 (.gitignore で除外)
 ├── plan/              # 開発計画ドキュメント
 ├── LICENSE
 └── CLAUDE.md
