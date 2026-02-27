@@ -9,9 +9,10 @@ fn main() {
 
     // --dict オプションで辞書ファイルを指定
     let dict = if let Some(pos) = args.iter().position(|a| a == "--dict") {
-        let path = args
-            .get(pos + 1)
-            .expect("--dict の後に辞書ファイルパスを指定してください");
+        let Some(path) = args.get(pos + 1) else {
+            eprintln!("エラー: --dict の後に辞書ファイルパスを指定してください");
+            std::process::exit(1);
+        };
         match Dictionary::load_from_file(Path::new(path)) {
             Ok(d) => {
                 eprintln!("辞書を読み込みました: {path}");

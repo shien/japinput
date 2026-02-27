@@ -96,8 +96,9 @@ fn parse_line(line: &str) -> Option<(String, Vec<String>)> {
         return None;
     }
 
-    // 読みと候補部分を最初の空白で分割
-    let (reading, rest) = line.split_once(' ')?;
+    // 読みと候補部分を最初の空白文字（スペースまたはタブ）で分割
+    let split_pos = line.find([' ', '\t'])?;
+    let (reading, rest) = (&line[..split_pos], line[split_pos..].trim_start());
     let reading = reading.trim();
     if reading.is_empty() {
         return None;
@@ -157,6 +158,14 @@ mod tests {
     #[test]
     fn parse_empty_line() {
         assert!(parse_line("").is_none());
+    }
+
+    #[test]
+    fn parse_tab_separated_entry() {
+        // タブ区切りの辞書行もパースできること
+        let result = parse_line("かんじ\t/漢字/感じ/").unwrap();
+        assert_eq!(result.0, "かんじ");
+        assert_eq!(result.1, vec!["漢字", "感じ"]);
     }
 
     #[test]
