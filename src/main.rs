@@ -1,5 +1,5 @@
 use japinput::dictionary::Dictionary;
-use japinput::input_state::InputState;
+use japinput::engine::{ConversionEngine, EngineCommand};
 use japinput::katakana;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
@@ -27,8 +27,11 @@ fn main() {
         None
     };
 
+    let has_dict = dict.is_some();
+    let mut engine = ConversionEngine::new(dict);
+
     println!("japinput - ローマ字→かな変換デモ");
-    if dict.is_some() {
+    if has_dict {
         println!("辞書検索モード: ローマ字を入力すると漢字候補も表示します。");
     }
     println!("ローマ字を入力して Enter で変換します。");
@@ -49,24 +52,26 @@ fn main() {
             break;
         }
 
-        let mut state = InputState::new();
+        // 各文字を InsertChar で処理
         for ch in line.chars() {
-            state.feed_char(ch);
+            engine.process(EngineCommand::InsertChar(ch));
         }
-        state.flush();
 
-        let hiragana = state.output();
-        let katakana = katakana::to_katakana(hiragana);
+        // Convert を試行
+        let output = engine.process(EngineCommand::Convert);
 
-        let _ = writeln!(stdout, "  ひらがな: {hiragana}");
-        let _ = writeln!(stdout, "  カタカナ: {katakana}");
+        if let Some(ref candidates) = output.candidates {
+            // 候補がある場合: 候補を表示し、1番目で確定
+            let _ = writeln!(stdout, "  変換候補: {}", candidates.join(" / "));
 
-        if let Some(ref dict) = dict {
-            if let Some(candidates) = dict.lookup(hiragana) {
-                let _ = writeln!(stdout, "  変換候補: {}", candidates.join(" / "));
-            } else {
-                let _ = writeln!(stdout, "  変換候補: (なし)");
-            }
+            let commit_output = engine.process(EngineCommand::Commit);
+            let _ = writeln!(stdout, "  確定: {}", commit_output.committed);
+        } else {
+            // 候補なし: Convert でひらがなが確定されるので表示
+            let hiragana = &output.committed;
+            let katakana_display = katakana::to_katakana(hiragana);
+            let _ = writeln!(stdout, "  ひらがな: {hiragana}");
+            let _ = writeln!(stdout, "  カタカナ: {katakana_display}");
         }
 
         let _ = writeln!(stdout);

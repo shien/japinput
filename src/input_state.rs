@@ -57,6 +57,20 @@ impl InputState {
     pub fn pending(&self) -> &str {
         &self.pending
     }
+
+    /// 末尾の1文字を削除する。pending があれば pending から、なければ output から削除。
+    pub fn backspace(&mut self) {
+        if !self.pending.is_empty() {
+            self.pending.pop();
+        } else {
+            self.output.pop();
+        }
+    }
+
+    /// 出力と pending の両方が空かどうか。
+    pub fn is_empty(&self) -> bool {
+        self.output.is_empty() && self.pending.is_empty()
+    }
 }
 
 impl Default for InputState {
@@ -199,5 +213,61 @@ mod tests {
         state.flush();
 
         assert_eq!(state.output(), batch.output);
+    }
+
+    // === backspace ===
+
+    #[test]
+    fn backspace_removes_pending() {
+        let mut state = InputState::new();
+        state.feed_char('k');
+        assert_eq!(state.pending(), "k");
+        state.backspace();
+        assert_eq!(state.pending(), "");
+        assert_eq!(state.output(), "");
+    }
+
+    #[test]
+    fn backspace_removes_output_char() {
+        let mut state = InputState::new();
+        state.feed_char('k');
+        state.feed_char('a');
+        assert_eq!(state.output(), "か");
+        assert_eq!(state.pending(), "");
+        state.backspace();
+        assert_eq!(state.output(), "");
+        assert_eq!(state.pending(), "");
+    }
+
+    #[test]
+    fn backspace_on_empty_does_nothing() {
+        let mut state = InputState::new();
+        state.backspace();
+        assert_eq!(state.output(), "");
+        assert_eq!(state.pending(), "");
+    }
+
+    #[test]
+    fn backspace_multi_char_output() {
+        let mut state = InputState::new();
+        for ch in "ka".chars() {
+            state.feed_char(ch);
+        }
+        for ch in "ki".chars() {
+            state.feed_char(ch);
+        }
+        assert_eq!(state.output(), "かき");
+        state.backspace();
+        assert_eq!(state.output(), "か");
+    }
+
+    // === is_empty ===
+
+    #[test]
+    fn is_empty_after_input() {
+        let mut state = InputState::new();
+        assert!(state.is_empty());
+        state.feed_char('k');
+        assert!(!state.is_empty());
     }
 }
