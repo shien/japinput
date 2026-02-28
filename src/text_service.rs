@@ -129,9 +129,33 @@ impl TextService {
     }
 
     fn load_default_dict() -> Option<Dictionary> {
-        let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-        let dict_path = exe_dir.join("dict").join("SKK-JISYO.L");
+        let dll_dir = Self::dll_directory()?;
+        let dict_path = dll_dir.join("dict").join("SKK-JISYO.L");
         Dictionary::load_from_file(&dict_path).ok()
+    }
+
+    /// DLL の配置ディレクトリを取得する。
+    ///
+    /// `DllMain` で記録した HMODULE から `GetModuleFileNameW` で DLL パスを解決する。
+    /// ホストプロセス（notepad.exe 等）ではなく DLL 自身のパスが返る。
+    fn dll_directory() -> Option<std::path::PathBuf> {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+        use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
+
+        let hmodule = crate::dll_exports::dll_instance();
+        if hmodule.0.is_null() {
+            return None;
+        }
+        let mut buf = [0u16; 260];
+        let len = unsafe { GetModuleFileNameW(Some(hmodule), &mut buf) } as usize;
+        if len == 0 {
+            return None;
+        }
+        let path = OsString::from_wide(&buf[..len]);
+        std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_path_buf())
     }
 
     /// EngineOutput に基づいて EditSession を発行し、Composition を更新する。

@@ -17,7 +17,7 @@ pub mod text_service;
 // === DLL エクスポート (Windows 専用) ===
 
 #[cfg(windows)]
-mod dll_exports {
+pub(crate) mod dll_exports {
     use std::sync::atomic::{AtomicIsize, Ordering};
 
     use windows::Win32::Foundation::*;
