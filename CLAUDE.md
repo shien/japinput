@@ -13,19 +13,26 @@ This file provides guidance for AI assistants (including Claude Code) working in
 
 ```
 japinput/
-├── Cargo.toml         # Rust package manifest (encoding_rs)
+├── Cargo.toml         # Rust package manifest (encoding_rs, windows)
 ├── src/
-│   ├── lib.rs         # Crate root (module declarations)
+│   ├── lib.rs         # Crate root (module declarations + DLL exports)
 │   ├── romaji.rs      # ローマ字 → ひらがな変換
 │   ├── katakana.rs    # ひらがな → カタカナ変換
 │   ├── input_state.rs # 入力状態管理 (逐次入力、backspace)
 │   ├── dictionary.rs  # SKK 辞書読み込み・検索
 │   ├── candidate.rs   # 変換候補リスト管理
 │   ├── engine.rs      # 変換エンジン (状態機械・コマンド処理)
+│   ├── key_mapping.rs # VirtualKey → EngineCommand 変換
+│   ├── guids.rs       # CLSID, Profile GUID 定義
+│   ├── text_service.rs    # TSF TextService (Windows 専用)
+│   ├── class_factory.rs   # COM ClassFactory (Windows 専用)
+│   ├── registry.rs        # COM/TSF レジストリ登録 (Windows 専用)
 │   └── main.rs        # CLI デモ (変換エンジン対応)
 ├── tests/
 │   └── fixtures/
 │       └── test_dict.txt  # テスト用 SKK 辞書
+├── installer/
+│   └── install.ps1    # Windows インストール/アンインストール
 ├── dict/              # 辞書ファイル配置先 (.gitignore で除外)
 ├── plan/              # 開発計画ドキュメント
 ├── LICENSE
@@ -52,6 +59,17 @@ cargo build
 | `cargo fmt` | コードをフォーマットする |
 | `cargo fmt -- --check` | フォーマット差分があるかチェックする（CI向け） |
 | `cargo run` | CLI デモを起動する（ローマ字→かな変換） |
+| `cargo build --release` | リリースビルド（Windows DLL 生成） |
+
+## Windows IME インストール
+
+Windows 環境でのみ:
+
+```powershell
+cargo build --release
+.\installer\install.ps1          # インストール（管理者権限）
+.\installer\install.ps1 -Uninstall  # アンインストール
+```
 
 ## Code Conventions
 
