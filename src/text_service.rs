@@ -3,7 +3,7 @@
 //! `ITfTextInputProcessorEx` と `ITfKeyEventSink` を実装し、
 //! Windows の TSF フレームワークと ConversionEngine を接続する。
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use windows::Win32::Foundation::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
@@ -14,13 +14,106 @@ use crate::dictionary::Dictionary;
 use crate::engine::{ConversionEngine, EngineOutput};
 use crate::key_mapping::{self, Modifiers};
 
+// === EditSession ===
+
+/// EditSession 内で実行するアクション。
+enum EditAction {
+    /// Composition を開始/更新してテキストを設定する。
+    SetText(String),
+    /// テキストを確定して Composition を終了する。
+    CommitText(String),
+    /// Composition を終了する。
+    EndComposition,
+}
+
+/// TSF の EditSession。テキスト操作は全て EditSession コールバック内で行う。
+///
+/// `RequestEditSession` に渡すと、TSF が適切なタイミングで
+/// `DoEditSession` を呼び出し、edit cookie を提供する。
+/// テキスト挿入・範囲操作はこの edit cookie を使って行う必要がある。
+#[implement(ITfEditSession)]
+struct EditSession {
+    context: ITfContext,
+    composition: Arc<Mutex<Option<ITfComposition>>>,
+    action: EditAction,
+}
+
+impl EditSession {
+    /// Composition が未開始なら、現在のカーソル位置で開始する。
+    fn ensure_composition(&self, ec: u32) -> Result<()> {
+        let mut comp = self.composition.lock().unwrap();
+        if comp.is_some() {
+            return Ok(());
+        }
+
+        unsafe {
+            // カーソル位置の範囲を取得（テキストは挿入しない）
+            let insert: ITfInsertAtSelection = self.context.cast()?;
+            let range = insert.InsertTextAtSelection(ec, TF_IAS_QUERYONLY, &[])?;
+
+            // その範囲で Composition を開始
+            let ctx_comp: ITfContextComposition = self.context.cast()?;
+            let new_comp = ctx_comp.StartComposition(ec, &range, None)?;
+
+            *comp = Some(new_comp);
+        }
+        Ok(())
+    }
+
+    /// Composition 範囲のテキストを設定する。
+    fn write_text(&self, ec: u32, text: &str) -> Result<()> {
+        let comp = self.composition.lock().unwrap();
+        if let Some(ref composition) = *comp {
+            unsafe {
+                let range = composition.GetRange()?;
+                let wide: Vec<u16> = text.encode_utf16().collect();
+                range.SetText(ec, 0, &wide)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Composition を終了し、参照をクリアする。
+    fn finish_composition(&self, ec: u32) -> Result<()> {
+        let mut comp = self.composition.lock().unwrap();
+        if let Some(composition) = comp.take() {
+            unsafe {
+                composition.EndComposition(ec)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ITfEditSession_Impl for EditSession_Impl {
+    fn DoEditSession(&self, ec: u32) -> Result<HRESULT> {
+        match &self.action {
+            EditAction::SetText(text) => {
+                self.ensure_composition(ec)?;
+                self.write_text(ec, text)?;
+            }
+            EditAction::CommitText(text) => {
+                self.ensure_composition(ec)?;
+                self.write_text(ec, text)?;
+                self.finish_composition(ec)?;
+            }
+            EditAction::EndComposition => {
+                self.finish_composition(ec)?;
+            }
+        }
+        Ok(S_OK)
+    }
+}
+
+// === TextService ===
+
 #[implement(ITfTextInputProcessorEx, ITfTextInputProcessor, ITfKeyEventSink)]
 pub struct TextService {
     thread_mgr: Mutex<Option<ITfThreadMgr>>,
     client_id: Mutex<u32>,
     engine: Mutex<ConversionEngine>,
     ime_on: Mutex<bool>,
-    composition: Mutex<Option<ITfComposition>>,
+    composition: Arc<Mutex<Option<ITfComposition>>>,
 }
 
 impl TextService {
@@ -31,7 +124,7 @@ impl TextService {
             client_id: Mutex::new(0),
             engine: Mutex::new(ConversionEngine::new(dict)),
             ime_on: Mutex::new(false),
-            composition: Mutex::new(None),
+            composition: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -41,84 +134,33 @@ impl TextService {
         Dictionary::load_from_file(&dict_path).ok()
     }
 
-    /// EngineOutput に基づいて Composition を更新する。
+    /// EngineOutput に基づいて EditSession を発行し、Composition を更新する。
     fn update_composition(&self, context: &ITfContext, output: &EngineOutput) -> Result<()> {
-        if !output.committed.is_empty() {
-            self.commit_text(context, &output.committed)?;
-            return Ok(());
-        }
-
-        if !output.display.is_empty() {
-            self.set_composition_text(context, &output.display)?;
+        let action = if !output.committed.is_empty() {
+            EditAction::CommitText(output.committed.clone())
+        } else if !output.display.is_empty() {
+            EditAction::SetText(output.display.clone())
         } else {
-            self.end_composition()?;
+            // 表示も確定テキストもない場合、Composition がなければ何もしない
+            if self.composition.lock().unwrap().is_none() {
+                return Ok(());
+            }
+            EditAction::EndComposition
+        };
+
+        let session: ITfEditSession = EditSession {
+            context: context.clone(),
+            composition: Arc::clone(&self.composition),
+            action,
         }
+        .into();
 
-        Ok(())
-    }
-
-    /// Composition を開始する（まだ開始していない場合）。
-    fn start_composition(&self, context: &ITfContext) -> Result<()> {
-        let mut comp = self.composition.lock().unwrap();
-        if comp.is_some() {
-            return Ok(());
-        }
-
-        let context_composition: ITfContextComposition = context.cast()?;
         let tid = *self.client_id.lock().unwrap();
-
         unsafe {
-            let edit_cookie = context.RequestEditSession(
-                tid,
-                &EditSessionStartComposition,
-                TF_ES_READWRITE | TF_ES_SYNC,
-            )?;
-            let _ = edit_cookie;
+            let _session_hr =
+                context.RequestEditSession(tid, &session, TF_ES_READWRITE | TF_ES_SYNC)?;
         }
 
-        // Composition 開始は EditSession 内で行う必要がある。
-        // 簡易実装: ITfInsertAtSelection → StartComposition
-        let _ = context_composition;
-
-        // Composition オブジェクトをキャッシュ
-        // 注意: 実際の実装では EditSession コールバック内で開始する
-        *comp = None; // placeholder
-
-        Ok(())
-    }
-
-    /// Composition テキストを設定する。
-    fn set_composition_text(&self, context: &ITfContext, text: &str) -> Result<()> {
-        self.start_composition(context)?;
-
-        let comp = self.composition.lock().unwrap();
-        if let Some(ref composition) = *comp {
-            unsafe {
-                let range = composition.GetRange()?;
-                let wide: Vec<u16> = text.encode_utf16().collect();
-                range.SetText(0, &wide)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// テキストを確定し、Composition を終了する。
-    fn commit_text(&self, context: &ITfContext, text: &str) -> Result<()> {
-        self.set_composition_text(context, text)?;
-        self.end_composition()?;
-        Ok(())
-    }
-
-    /// Composition を終了する。
-    fn end_composition(&self) -> Result<()> {
-        let mut comp = self.composition.lock().unwrap();
-        if let Some(ref composition) = *comp {
-            unsafe {
-                composition.EndComposition()?;
-            }
-        }
-        *comp = None;
         Ok(())
     }
 }
@@ -155,7 +197,9 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
         }
 
         *self.ime_on.lock().unwrap() = false;
-        self.end_composition().ok();
+        // EditSession なしでは EndComposition(ec) を呼べないため、参照のみ解放する。
+        // TSF は TIP の Deactivate 時にアクティブな Composition を自動終了する。
+        *self.composition.lock().unwrap() = None;
         Ok(())
     }
 }
@@ -239,6 +283,3 @@ fn modifiers_from_keyboard_state() -> Modifiers {
         }
     }
 }
-
-// EditSession (簡易版: Composition 開始用)
-struct EditSessionStartComposition;
