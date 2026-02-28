@@ -1,5 +1,5 @@
 use japinput::dictionary::Dictionary;
-use japinput::input_state::InputState;
+use japinput::engine::{ConversionEngine, EngineCommand};
 use japinput::katakana;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
@@ -27,8 +27,11 @@ fn main() {
         None
     };
 
+    let has_dict = dict.is_some();
+    let mut engine = ConversionEngine::new(dict);
+
     println!("japinput - ローマ字→かな変換デモ");
-    if dict.is_some() {
+    if has_dict {
         println!("辞書検索モード: ローマ字を入力すると漢字候補も表示します。");
     }
     println!("ローマ字を入力して Enter で変換します。");
@@ -49,21 +52,29 @@ fn main() {
             break;
         }
 
-        let mut state = InputState::new();
+        // 各文字を InsertChar で処理
         for ch in line.chars() {
-            state.feed_char(ch);
+            engine.process(EngineCommand::InsertChar(ch));
         }
-        state.flush();
 
-        let hiragana = state.output();
-        let katakana = katakana::to_katakana(hiragana);
-
+        // Convert 前にひらがなを取得（Commit でひらがな確定→取得）
+        let composing_output = engine.process(EngineCommand::Commit);
+        let hiragana = composing_output.committed;
+        let katakana_display = katakana::to_katakana(&hiragana);
         let _ = writeln!(stdout, "  ひらがな: {hiragana}");
-        let _ = writeln!(stdout, "  カタカナ: {katakana}");
+        let _ = writeln!(stdout, "  カタカナ: {katakana_display}");
 
-        if let Some(ref dict) = dict {
-            if let Some(candidates) = dict.lookup(hiragana) {
+        // 辞書がある場合は再度入力して変換を試行
+        if has_dict {
+            for ch in line.chars() {
+                engine.process(EngineCommand::InsertChar(ch));
+            }
+            let output = engine.process(EngineCommand::Convert);
+
+            if let Some(ref candidates) = output.candidates {
                 let _ = writeln!(stdout, "  変換候補: {}", candidates.join(" / "));
+                let commit_output = engine.process(EngineCommand::Commit);
+                let _ = writeln!(stdout, "  確定: {}", commit_output.committed);
             } else {
                 let _ = writeln!(stdout, "  変換候補: (なし)");
             }
