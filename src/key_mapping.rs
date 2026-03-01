@@ -18,6 +18,7 @@ pub const VK_SPACE: u16 = 0x20;
 pub const VK_UP: u16 = 0x26;
 pub const VK_DOWN: u16 = 0x28;
 pub const VK_0: u16 = 0x30;
+pub const VK_9: u16 = 0x39;
 pub const VK_A: u16 = 0x41;
 pub const VK_Z: u16 = 0x5A;
 pub const VK_F1: u16 = 0x70;
@@ -91,6 +92,10 @@ pub fn map_key(vk: u16, modifiers: &Modifiers, ime_on: bool) -> Option<EngineCom
             } else {
                 base
             };
+            Some(EngineCommand::InsertChar(ch))
+        }
+        VK_0..=VK_9 if !modifiers.shift => {
+            let ch = (b'0' + (vk - VK_0) as u8) as char;
             Some(EngineCommand::InsertChar(ch))
         }
         VK_SPACE => Some(EngineCommand::Convert),
@@ -208,9 +213,33 @@ mod tests {
         assert_eq!(cmd, None);
     }
 
+    // === 数字キー ===
+
     #[test]
-    fn number_keys_return_none() {
+    fn number_key_0() {
         let cmd = map_key(VK_0, &Modifiers::none(), true);
+        assert_eq!(cmd, Some(EngineCommand::InsertChar('0')));
+    }
+
+    #[test]
+    fn number_key_9() {
+        let cmd = map_key(VK_9, &Modifiers::none(), true);
+        assert_eq!(cmd, Some(EngineCommand::InsertChar('9')));
+    }
+
+    #[test]
+    fn number_keys_all() {
+        for vk in VK_0..=VK_9 {
+            let cmd = map_key(vk, &Modifiers::none(), true);
+            let expected_char = (b'0' + (vk - VK_0) as u8) as char;
+            assert_eq!(cmd, Some(EngineCommand::InsertChar(expected_char)));
+        }
+    }
+
+    #[test]
+    fn number_key_with_shift_returns_none() {
+        // Shift+数字はシステムに処理を委ねる（! @ # 等）
+        let cmd = map_key(VK_0, &Modifiers::shift(), true);
         assert_eq!(cmd, None);
     }
 

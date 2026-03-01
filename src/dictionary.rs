@@ -3,7 +3,7 @@
 //! SKK 辞書ファイルをパースし、ひらがなの読みから
 //! 変換候補（漢字）を検索する。
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 /// 辞書操作で発生するエラー。
@@ -29,7 +29,7 @@ impl From<std::io::Error> for DictionaryError {
 
 /// 読みから候補リストへのマッピングを保持する辞書。
 pub struct Dictionary {
-    entries: HashMap<String, Vec<String>>,
+    entries: BTreeMap<String, Vec<String>>,
 }
 
 impl Default for Dictionary {
@@ -42,7 +42,7 @@ impl Dictionary {
     /// 空の辞書を作成する。
     pub fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: BTreeMap::new(),
         }
     }
 
@@ -62,7 +62,12 @@ impl Dictionary {
         let mut dict = Self::new();
         for line in text.lines() {
             if let Some((reading, candidates)) = parse_line(line) {
-                dict.entries.entry(reading).or_default().extend(candidates);
+                let entry = dict.entries.entry(reading).or_default();
+                for c in candidates {
+                    if !entry.contains(&c) {
+                        entry.push(c);
+                    }
+                }
             }
         }
 
@@ -75,16 +80,38 @@ impl Dictionary {
     }
 
     /// 前方一致検索。指定のプレフィクスで始まる読みとその候補を返す。
+    ///
+    /// BTreeMap の range を使い、プレフィクスに一致する範囲のみを走査する。
     pub fn lookup_prefix(&self, prefix: &str) -> Vec<(&str, &[String])> {
-        let mut results: Vec<(&str, &[String])> = self
-            .entries
-            .iter()
-            .filter(|(reading, _)| reading.starts_with(prefix))
+        // BTreeMap は sorted なので range で効率的に前方一致検索できる。
+        // prefix の末尾文字をインクリメントして上限を作る。
+        let start = prefix.to_string();
+        let end = prefix_end_bound(prefix);
+        let iter: Box<dyn Iterator<Item = _>> = match &end {
+            Some(end) => Box::new(self.entries.range(start..end.clone())),
+            None => Box::new(self.entries.range(start..)),
+        };
+        iter.filter(|(reading, _)| reading.starts_with(prefix))
             .map(|(reading, candidates)| (reading.as_str(), candidates.as_slice()))
-            .collect();
-        results.sort_by_key(|(reading, _)| *reading);
-        results
+            .collect()
     }
+}
+
+/// プレフィクスの「次の文字列」を返す（range 検索の上限用）。
+///
+/// 末尾の文字をインクリメントして上限を作る。
+/// インクリメントできない場合（char::MAX）は None を返す。
+fn prefix_end_bound(prefix: &str) -> Option<String> {
+    let mut chars: Vec<char> = prefix.chars().collect();
+    // 末尾の文字をインクリメント
+    while let Some(last) = chars.pop() {
+        if let Some(next) = char::from_u32(last as u32 + 1) {
+            chars.push(next);
+            return Some(chars.into_iter().collect());
+        }
+        // char::MAX の場合は桁上がり → 1つ前の文字をインクリメント
+    }
+    None
 }
 
 /// SKK 辞書の1行をパースする。
@@ -268,6 +295,25 @@ mod tests {
         let results = dict.lookup_prefix("かんじ");
         let readings: Vec<&str> = results.iter().map(|(r, _)| *r).collect();
         assert!(readings.contains(&"かんじ"));
+    }
+
+    // === 候補の重複排除 ===
+
+    #[test]
+    fn dedup_candidates() {
+        // 同じ読みが複数行にあっても候補が重複しないこと
+        let content = "かんじ /漢字/感じ/\nかんじ /漢字/幹事/\n";
+        let dir = std::env::temp_dir().join("japinput_test_dedup");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test_dedup.dict");
+        std::fs::write(&path, content).unwrap();
+
+        let dict = Dictionary::load_from_file(&path).unwrap();
+        let result = dict.lookup("かんじ").unwrap();
+        // "漢字" は1回だけ登場する
+        assert_eq!(result, &["漢字", "感じ", "幹事"]);
+
+        let _ = std::fs::remove_file(&path);
     }
 
     // === EUC-JP 対応 ===
