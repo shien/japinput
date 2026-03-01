@@ -1,11 +1,10 @@
-# Phase 7.5: Emacs キーバインドの追加（設定で変更可能）
+# Phase 7.5: Emacs キーバインドの追加（プリセット + 設定で変更可能）
 
 ## 目標
 
 Emacs スタイルのキーバインド（Ctrl+キー）を変換エンジンに追加し、
 ホームポジションから手を離さずに変換操作できるようにする。
-さらに、キーバインドの割り当てを `config.toml` で変更可能にし、
-ユーザーが好みに応じてカスタマイズできるようにする。
+プリセット方式と個別設定を組み合わせ、ユーザーが好みに応じてカスタマイズできるようにする。
 
 ## 背景
 
@@ -13,51 +12,89 @@ Emacs スタイルのキーバインド（Ctrl+キー）を変換エンジンに
 日本語 IME のユーザーには Emacs キーバインドを好む層が多く、SKK 自体も Emacs 発祥のため親和性が高い。
 Ctrl+キーの組み合わせで変換・確定・キャンセル等の操作を可能にすることで、入力効率を大幅に向上させる。
 
-一方、Emacs キーバインドに馴染みのないユーザーや、独自の割り当てを好むユーザーもいるため、
-Ctrl+キーの割り当てを設定ファイルでカスタマイズできるようにする。
+ただし、`Ctrl+N`（新規）、`Ctrl+P`（印刷）、`Ctrl+H`（置換）などは Windows アプリケーションの
+標準ショートカットと競合する。そのため、プリセットと個別設定の2段階でキーバインドを管理する。
 
-### デフォルトキーバインド
+### プリセット方式
 
-| キーバインド | 動作 | 対応する EngineCommand | 既存キー |
-|-------------|------|----------------------|---------|
-| `Ctrl+J` | 確定 (Commit) | `Commit` | `Enter` |
-| `Ctrl+G` | キャンセル (Cancel) | `Cancel` | `Escape` |
-| `Ctrl+N` | 次の候補 | `NextCandidate` | `↓` |
-| `Ctrl+P` | 前の候補 | `PrevCandidate` | `↑` |
-| `Ctrl+H` | 1文字削除 (Backspace) | `Backspace` | `Backspace` |
-| `Ctrl+M` | 確定 (Commit) ※ Enter と同等 | `Commit` | `Enter` |
-| `Ctrl+A` | 行頭移動 ※ 将来拡張用 | (Phase 7.5 ではスコープ外) | — |
-| `Ctrl+E` | 行末移動 ※ 将来拡張用 | (Phase 7.5 ではスコープ外) | — |
+`config.toml` で `keybind_preset` を指定し、キーバインドのベースを選択する。
+プリセットをベースに、`[keybind]` セクションで個別のキーを上書きできる。
 
-**Phase 7.5 のスコープ:** `Ctrl+J`, `Ctrl+G`, `Ctrl+N`, `Ctrl+P`, `Ctrl+H`, `Ctrl+M` の6つ。
-カーソル移動系 (`Ctrl+A`, `Ctrl+E`, `Ctrl+F`, `Ctrl+B`) は Composing 状態でのカーソル移動機能と
-合わせて将来フェーズで実装する。
+| プリセット | 説明 | 有効なキー |
+|-----------|------|-----------|
+| `"none"` | Ctrl+キー割り当てなし（デフォルト） | なし |
+| `"minimal"` | 競合の少ないキーのみ | `Ctrl+J`=確定, `Ctrl+G`=キャンセル, `Ctrl+M`=確定 |
+| `"emacs"` | Emacs フルセット | `Ctrl+J/G/N/P/H/M` すべて有効 |
 
-### 設定ファイルによるキーバインドのカスタマイズ
+**デフォルトは `"none"`**。Emacs キーバインドを使いたいユーザーが明示的に有効化する。
 
-`config.toml` に `[keybind]` セクションを追加し、Ctrl+キーの割り当てを変更可能にする。
+### 各プリセットの詳細
+
+#### `"none"` プリセット（デフォルト）
+
+Ctrl+キーの割り当てなし。従来と同じ動作。
+
+| キーバインド | 割り当て |
+|-------------|---------|
+| `Ctrl+J` | なし |
+| `Ctrl+G` | なし |
+| `Ctrl+N` | なし |
+| `Ctrl+P` | なし |
+| `Ctrl+H` | なし |
+| `Ctrl+M` | なし |
+
+#### `"minimal"` プリセット
+
+Windows 標準ショートカットと競合しにくいキーのみ有効。
+
+| キーバインド | 割り当て | 競合リスク |
+|-------------|---------|-----------|
+| `Ctrl+J` | Commit (確定) | 低 — 標準の割り当てなし |
+| `Ctrl+G` | Cancel (キャンセル) | 低 — 一部エディタで行ジャンプ |
+| `Ctrl+M` | Commit (確定) | 低 — Enter と同等 |
+| `Ctrl+N` | なし | 中 — 新規ウィンドウ |
+| `Ctrl+P` | なし | 中 — 印刷 |
+| `Ctrl+H` | なし | 中 — 置換ダイアログ |
+
+#### `"emacs"` プリセット
+
+Emacs キーバインドをフルに有効化。OS のショートカットを上書きする。
+
+| キーバインド | 割り当て | 上書きされる OS 操作 |
+|-------------|---------|-------------------|
+| `Ctrl+J` | Commit (確定) | — |
+| `Ctrl+G` | Cancel (キャンセル) | 行ジャンプ（一部エディタ） |
+| `Ctrl+N` | NextCandidate (次の候補) | 新規ウィンドウ |
+| `Ctrl+P` | PrevCandidate (前の候補) | 印刷 |
+| `Ctrl+H` | Backspace (1文字削除) | 置換ダイアログ |
+| `Ctrl+M` | Commit (確定) | — |
+
+### 設定ファイルの構造
 
 ```toml
 # config.toml
 
+[general]
+# プリセット: "none" | "minimal" | "emacs"
+keybind_preset = "none"
+
 [keybind]
-# Ctrl+キーの割り当て。値は: commit, cancel, next, prev, backspace, none
-# "none" を指定するとそのキーの Ctrl+割り当てを無効化する
-ctrl_j = "commit"
-ctrl_g = "cancel"
-ctrl_n = "next"
-ctrl_p = "prev"
-ctrl_h = "backspace"
-ctrl_m = "commit"
+# プリセットをベースに、個別のキーを上書きする。
+# 値は: commit, cancel, next, prev, backspace, convert, none
+# このセクションを省略するとプリセットがそのまま適用される。
+# ctrl_j = "commit"
+# ctrl_n = "none"
 ```
 
-**設計方針:**
-- `[keybind]` セクションが省略された場合、上記のデフォルト値を使用する
-- 個別のキーが省略された場合もデフォルト値を使用する
-- `"none"` を指定するとそのキーの Ctrl+割り当てを無効化できる
-- 不正な値が指定された場合はパースエラーとする
-- 割り当て可能なコマンド: `"commit"`, `"cancel"`, `"next"`, `"prev"`, `"backspace"`, `"convert"`, `"none"`
-- 同じコマンドを複数のキーに割り当て可能（例: `ctrl_j` と `ctrl_m` の両方に `"commit"`）
+**適用ルール:**
+1. `keybind_preset` でベースとなるキーバインドを決定する
+2. `[keybind]` セクションで指定されたキーのみ上書きする
+3. `[keybind]` セクション未指定のキーはプリセットの値を維持する
+4. `"none"` を指定するとそのキーの割り当てを無効化する
+
+**Phase 7.5 のスコープ:** `Ctrl+J`, `Ctrl+G`, `Ctrl+N`, `Ctrl+P`, `Ctrl+H`, `Ctrl+M` の6つ。
+カーソル移動系 (`Ctrl+A`, `Ctrl+E`, `Ctrl+F`, `Ctrl+B`) は Composing 状態でのカーソル移動機能と
+合わせて将来フェーズで実装する。
 
 ## 前提
 
@@ -68,23 +105,32 @@ ctrl_m = "commit"
 
 ## タスク
 
-### 7.5.1 CtrlKeyConfig 構造体の定義
+### 7.5.1 CtrlKeyConfig 構造体とプリセットの定義
 
-Ctrl+キーの割り当てを保持する構造体を定義する。
+Ctrl+キーの割り当てを保持する構造体とプリセットを定義する。
 
 - [ ] `CtrlKeyConfig` 構造体を `key_mapping.rs` に定義する
-- [ ] 各フィールドは `Option<EngineCommand>` 型（`None` = 無効）
-- [ ] `Default` トレイトでデフォルトの Emacs キーバインドを返す
-- [ ] Phase 6 の `Config` に `keybind: CtrlKeyConfig` フィールドを追加する設計を明記
+- [ ] 各フィールドは `Option<EngineCommand>` 型（`None` = OS に委ねる）
+- [ ] `KeybindPreset` 列挙型を定義: `None`, `Minimal`, `Emacs`
+- [ ] `CtrlKeyConfig::from_preset(preset)` で各プリセットの設定を生成
+- [ ] `Default` トレイトは `KeybindPreset::None`（全て無効）を返す
 
 ```rust
+/// キーバインドプリセット。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeybindPreset {
+    /// Ctrl+キー割り当てなし（デフォルト）
+    None,
+    /// 競合の少ないキーのみ (Ctrl+J, Ctrl+G, Ctrl+M)
+    Minimal,
+    /// Emacs フルセット (Ctrl+J/G/N/P/H/M)
+    Emacs,
+}
+
 /// Ctrl+キーの割り当て設定。
 /// 各フィールドが None の場合、そのキーは OS に処理を委ねる。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CtrlKeyConfig {
-    pub ctrl_a: Option<EngineCommand>,
-    pub ctrl_b: Option<EngineCommand>,
-    // ... ctrl_c は OS のコピーと競合するため対象外
     pub ctrl_g: Option<EngineCommand>,
     pub ctrl_h: Option<EngineCommand>,
     pub ctrl_j: Option<EngineCommand>,
@@ -92,45 +138,102 @@ pub struct CtrlKeyConfig {
     pub ctrl_n: Option<EngineCommand>,
     pub ctrl_p: Option<EngineCommand>,
 }
+
+impl CtrlKeyConfig {
+    /// プリセットからキーバインド設定を生成する。
+    pub fn from_preset(preset: &KeybindPreset) -> Self {
+        match preset {
+            KeybindPreset::None => Self {
+                ctrl_g: None,
+                ctrl_h: None,
+                ctrl_j: None,
+                ctrl_m: None,
+                ctrl_n: None,
+                ctrl_p: None,
+            },
+            KeybindPreset::Minimal => Self {
+                ctrl_g: Some(EngineCommand::Cancel),
+                ctrl_h: None,
+                ctrl_j: Some(EngineCommand::Commit),
+                ctrl_m: Some(EngineCommand::Commit),
+                ctrl_n: None,
+                ctrl_p: None,
+            },
+            KeybindPreset::Emacs => Self {
+                ctrl_g: Some(EngineCommand::Cancel),
+                ctrl_h: Some(EngineCommand::Backspace),
+                ctrl_j: Some(EngineCommand::Commit),
+                ctrl_m: Some(EngineCommand::Commit),
+                ctrl_n: Some(EngineCommand::NextCandidate),
+                ctrl_p: Some(EngineCommand::PrevCandidate),
+            },
+        }
+    }
+}
+
+impl Default for CtrlKeyConfig {
+    fn default() -> Self {
+        Self::from_preset(&KeybindPreset::None)
+    }
+}
 ```
 
 **動作確認:**
-- `cargo test` でデフォルト値のテスト（7.5.2）がパスすること
+- `cargo test` でプリセットとデフォルト値のテスト（7.5.2）がパスすること
 - `cargo clippy` がクリーンであること
 
 ### 7.5.2 テストの追加
 
 TDD に従い、まずテストを書いてから実装を行う。
 
-#### CtrlKeyConfig のテスト
+#### プリセットのテスト
 
-- [ ] `default_ctrl_config_emacs` — デフォルトが Emacs キーバインドであること
-- [ ] `ctrl_config_none_disables_key` — `None` を設定したキーが無効になること
+- [ ] `preset_none_all_disabled` — `None` プリセットで全キーが無効であること
+- [ ] `preset_minimal_only_safe_keys` — `Minimal` で `Ctrl+J/G/M` のみ有効、`Ctrl+N/P/H` は無効
+- [ ] `preset_emacs_all_enabled` — `Emacs` で全6キーが有効であること
+- [ ] `default_is_none_preset` — `Default` が `None` プリセットと一致すること
 
-#### map_key のテスト（デフォルト設定）
+#### map_key のテスト（Emacs プリセット）
 
-- [ ] `ctrl_j_commits` — `Ctrl+J` が `EngineCommand::Commit` を返す
-- [ ] `ctrl_g_cancels` — `Ctrl+G` が `EngineCommand::Cancel` を返す
-- [ ] `ctrl_n_next_candidate` — `Ctrl+N` が `EngineCommand::NextCandidate` を返す
-- [ ] `ctrl_p_prev_candidate` — `Ctrl+P` が `EngineCommand::PrevCandidate` を返す
-- [ ] `ctrl_h_backspace` — `Ctrl+H` が `EngineCommand::Backspace` を返す
-- [ ] `ctrl_m_commits` — `Ctrl+M` が `EngineCommand::Commit` を返す
-- [ ] `ctrl_other_returns_none` — `Ctrl+A` 等の未割り当てキーが `None` を返す
-- [ ] `ctrl_alt_returns_none` — `Ctrl+Alt+J` 等の複合修飾キーが `None` を返す
+- [ ] `emacs_ctrl_j_commits` — `Ctrl+J` が `EngineCommand::Commit` を返す
+- [ ] `emacs_ctrl_g_cancels` — `Ctrl+G` が `EngineCommand::Cancel` を返す
+- [ ] `emacs_ctrl_n_next_candidate` — `Ctrl+N` が `EngineCommand::NextCandidate` を返す
+- [ ] `emacs_ctrl_p_prev_candidate` — `Ctrl+P` が `EngineCommand::PrevCandidate` を返す
+- [ ] `emacs_ctrl_h_backspace` — `Ctrl+H` が `EngineCommand::Backspace` を返す
+- [ ] `emacs_ctrl_m_commits` — `Ctrl+M` が `EngineCommand::Commit` を返す
 
-#### カスタム設定のテスト
+#### map_key のテスト（Minimal プリセット）
 
-- [ ] `custom_ctrl_j_cancel` — `ctrl_j` を `Cancel` に変更した場合に正しく動作すること
-- [ ] `custom_ctrl_n_none` — `ctrl_n` を `None` にした場合、`Ctrl+N` が `None` を返すこと
-- [ ] `custom_ctrl_a_convert` — 通常は未割り当ての `ctrl_a` に `Convert` を割り当て可能なこと
+- [ ] `minimal_ctrl_j_commits` — `Ctrl+J` が `Commit` を返す
+- [ ] `minimal_ctrl_n_returns_none` — `Ctrl+N` が `None` を返す（OS に委ねる）
+- [ ] `minimal_ctrl_p_returns_none` — `Ctrl+P` が `None` を返す
+- [ ] `minimal_ctrl_h_returns_none` — `Ctrl+H` が `None` を返す
+
+#### map_key のテスト（None プリセット）
+
+- [ ] `none_preset_ctrl_j_returns_none` — `Ctrl+J` が `None` を返す
+
+#### map_key のテスト（共通）
+
+- [ ] `ctrl_other_returns_none` — 未設定キー（`Ctrl+A` 等）が `None` を返す
+- [ ] `ctrl_alt_returns_none` — `Ctrl+Alt+J` が `None` を返す
+
+#### カスタム設定のテスト（プリセット + 個別上書き）
+
+- [ ] `emacs_override_ctrl_n_none` — Emacs プリセットで `ctrl_n` を `None` に上書き可能
+- [ ] `none_override_ctrl_j_commit` — None プリセットで `ctrl_j` を `Commit` に個別追加可能
+- [ ] `minimal_override_ctrl_h_backspace` — Minimal プリセットで `ctrl_h` を `Backspace` に追加可能
 
 #### TOML パースのテスト
 
-- [ ] `parse_keybind_section` — `[keybind]` セクションのパースが正しいこと
+- [ ] `parse_preset_emacs` — `keybind_preset = "emacs"` が正しくパースされること
+- [ ] `parse_preset_minimal` — `keybind_preset = "minimal"` が正しくパースされること
+- [ ] `parse_preset_none` — `keybind_preset = "none"` が正しくパースされること
+- [ ] `parse_preset_missing_defaults_to_none` — `keybind_preset` 省略時は `"none"` になること
+- [ ] `parse_preset_invalid_errors` — 不正なプリセット名がエラーになること
+- [ ] `parse_keybind_override` — プリセット + `[keybind]` セクションの上書きが正しいこと
 - [ ] `parse_keybind_none_value` — `"none"` が `None` にパースされること
-- [ ] `parse_keybind_missing_uses_default` — 省略されたキーはデフォルト値を使うこと
-- [ ] `parse_keybind_invalid_value_errors` — 不正な値がエラーになること
-- [ ] `parse_no_keybind_section_uses_default` — `[keybind]` 省略時はデフォルト全体を使うこと
+- [ ] `parse_keybind_invalid_command_errors` — 不正なコマンド名がエラーになること
 
 **動作確認:**
 - Red: 新規テストを追加し `cargo test` で失敗することを確認
@@ -176,8 +279,6 @@ pub fn map_key(
 
 fn map_ctrl_key(vk: u16, config: &CtrlKeyConfig) -> Option<EngineCommand> {
     match vk {
-        VK_A => config.ctrl_a.clone(),
-        VK_B => config.ctrl_b.clone(),
         VK_G => config.ctrl_g.clone(),
         VK_H => config.ctrl_h.clone(),
         VK_J => config.ctrl_j.clone(),
@@ -195,14 +296,27 @@ fn map_ctrl_key(vk: u16, config: &CtrlKeyConfig) -> Option<EngineCommand> {
 
 ### 7.5.4 TOML パース対応
 
-Phase 6 の `Config` 構造体に `keybind: CtrlKeyConfig` フィールドを追加し、
-`[keybind]` セクションのパースを実装する。
+Phase 6 の `Config` 構造体に `keybind_preset` と `keybind` を追加し、
+プリセット + 個別上書きのパースを実装する。
 
-- [ ] `Config` に `pub keybind: CtrlKeyConfig` フィールドを追加
-- [ ] `[keybind]` セクションのパースロジックを実装
+- [ ] `Config` に `pub keybind_preset: KeybindPreset` フィールドを追加
+- [ ] `Config` に `pub keybind: CtrlKeyConfig` フィールドを追加（プリセット適用後の最終結果）
+- [ ] パース処理: まず `keybind_preset` からベースを生成し、`[keybind]` セクションで上書き
 - [ ] コマンド名文字列 ↔ `EngineCommand` の変換ヘルパーを用意
 
 ```rust
+// プリセット名 → KeybindPreset の変換
+fn parse_preset(value: &str) -> Result<KeybindPreset, ConfigError> {
+    match value {
+        "none" => Ok(KeybindPreset::None),
+        "minimal" => Ok(KeybindPreset::Minimal),
+        "emacs" => Ok(KeybindPreset::Emacs),
+        _ => Err(ConfigError::Parse(
+            format!("不正なプリセット名: {value} (none, minimal, emacs のいずれか)")
+        )),
+    }
+}
+
 // コマンド名 → EngineCommand の変換
 fn parse_command(value: &str) -> Result<Option<EngineCommand>, ConfigError> {
     match value {
@@ -218,17 +332,30 @@ fn parse_command(value: &str) -> Result<Option<EngineCommand>, ConfigError> {
         )),
     }
 }
+
+// パース処理のフロー
+fn parse_keybind(text: &str) -> Result<CtrlKeyConfig, ConfigError> {
+    // 1. keybind_preset をパース（デフォルト: "none"）
+    let preset = parse_preset(/* ... */)?;
+    let mut config = CtrlKeyConfig::from_preset(&preset);
+
+    // 2. [keybind] セクションで個別上書き
+    // ctrl_j = "cancel" → config.ctrl_j = Some(EngineCommand::Cancel)
+    // ctrl_n = "none"   → config.ctrl_n = None
+
+    Ok(config)
+}
 ```
 
 **動作確認:**
 - `cargo test` で TOML パーステストがパスすること
-- 不正な値でエラーが返ることを確認
+- プリセット + 上書きの組み合わせが正しく動作すること
 
 ### 7.5.5 統合テスト（エンジン経由の動作確認）
 
 `key_mapping` のユニットテストに加え、エンジン経由で Emacs キーバインドが正しく動作することを確認する。
 
-#### デフォルト設定での動作
+#### Emacs プリセットでの動作
 
 - [ ] Composing 状態で `Ctrl+J` → ひらがな確定 → Direct
 - [ ] Converting 状態で `Ctrl+J` → 候補確定 → Direct
@@ -237,10 +364,13 @@ fn parse_command(value: &str) -> Result<Option<EngineCommand>, ConfigError> {
 - [ ] Converting 状態で `Ctrl+N` / `Ctrl+P` → 候補移動
 - [ ] Composing 状態で `Ctrl+H` → 1文字削除
 
+#### None プリセットでの動作
+
+- [ ] Composing 状態で `Ctrl+J` → `None`（未処理、OS に委ねる）
+
 #### カスタム設定での動作
 
-- [ ] `ctrl_j = "cancel"` に変更した設定で `Ctrl+J` → Cancel が動作すること
-- [ ] `ctrl_n = "none"` に変更した設定で `Ctrl+N` → `None`（未処理）になること
+- [ ] Emacs プリセット + `ctrl_n = "none"` で `Ctrl+N` → `None` になること
 
 **動作確認:**
 - `cargo test` で統合テストがパスすること
@@ -254,20 +384,21 @@ TSF 連携部分で Ctrl キーの押下状態を正しく `Modifiers` に反映
 - [ ] `text_service.rs` の `OnKeyDown` で `GetKeyState(VK_CONTROL)` を参照
 - [ ] `Modifiers { ctrl: true, .. }` として `map_key` に渡す
 - [ ] `Config` から `CtrlKeyConfig` を取得し `map_key` に渡す
-- [ ] 手動テスト: Windows 上で Ctrl+J による確定動作を確認
+- [ ] 手動テスト: `keybind_preset = "emacs"` で Ctrl+J による確定動作を確認
 - [ ] 手動テスト: `config.toml` の `[keybind]` を変更して割り当てが変わることを確認
 
 **動作確認:**
 - `cargo build --release` がエラーなく完了すること（Windows 環境）
-- Windows 上で IME を有効にし、`Ctrl+J` で確定、`Ctrl+G` でキャンセルが動作すること（手動確認）
-- `config.toml` の `[keybind]` セクションを編集し、IME 再起動後に変更が反映されること（手動確認）
+- `keybind_preset = "emacs"` で Ctrl+J 確定、Ctrl+G キャンセルが動作すること（手動確認）
+- `keybind_preset = "none"` で Ctrl+キーが OS に委ねられることを確認（手動確認）
+- `[keybind]` セクションの個別上書きが IME 再起動後に反映されること（手動確認）
 
 ## 実装順序
 
 | 順序 | タスク | 依存 | 規模 |
 |-----|--------|------|------|
 | 1 | 7.5.2 テストの追加 (Red) | なし | 小 |
-| 2 | 7.5.1 CtrlKeyConfig 構造体の定義 (Green) | 7.5.2 | 小 |
+| 2 | 7.5.1 CtrlKeyConfig + プリセット定義 (Green) | 7.5.2 | 小 |
 | 3 | 7.5.3 map_key の設定対応 (Green) | 7.5.1, 7.5.2 | 中 |
 | 4 | 7.5.4 TOML パース対応 (Green) | 7.5.1 | 中 |
 | 5 | 7.5.5 統合テスト | 7.5.3 | 小 |
@@ -275,10 +406,12 @@ TSF 連携部分で Ctrl キーの押下状態を正しく `Modifiers` に反映
 
 ## 完了条件
 
-- デフォルトで Emacs キーバインド (`Ctrl+J/G/N/P/H/M`) が EngineCommand に変換されること
-- `config.toml` の `[keybind]` セクションでキーの割り当てを変更できること
+- プリセット (`"none"`, `"minimal"`, `"emacs"`) でキーバインドのベースを選択できること
+- デフォルトプリセットが `"none"`（全 Ctrl+キー無効）であること
+- `"emacs"` プリセットで `Ctrl+J/G/N/P/H/M` が全て有効になること
+- `"minimal"` プリセットで競合の少ない `Ctrl+J/G/M` のみ有効になること
+- `[keybind]` セクションでプリセットの個別キーを上書きできること
 - `"none"` を指定することで特定の Ctrl+キーの割り当てを無効化できること
-- `[keybind]` セクション省略時はデフォルト（Emacs キーバインド）が適用されること
 - 既存のキーバインド（Enter, Escape, 矢印キー等）が引き続き動作すること
 - Ctrl+未設定キーは `None` を返し、OS に処理を委ねること
 - `cargo test` で全テストがパスすること
@@ -288,59 +421,75 @@ TSF 連携部分で Ctrl キーの押下状態を正しく `Modifiers` に反映
 
 ```
 src/
-├── key_mapping.rs     # CtrlKeyConfig 追加、map_key に設定引数追加（主な変更）
-├── config.rs          # [keybind] セクションのパース追加（Phase 6 と共同）
+├── key_mapping.rs     # CtrlKeyConfig, KeybindPreset, map_key 設定対応（主な変更）
+├── config.rs          # keybind_preset + [keybind] セクションのパース（Phase 6 と共同）
 ├── text_service.rs    # Ctrl キー状態の取得 + CtrlKeyConfig の受け渡し（Windows のみ）
 ├── engine.rs          # 変更なし（既存の EngineCommand をそのまま使用）
 ```
 
 ## 設定ファイル例
 
-### デフォルト（Emacs キーバインド）
+### デフォルト（Ctrl+キー割り当てなし）
 
 ```toml
-[keybind]
-ctrl_j = "commit"
-ctrl_g = "cancel"
-ctrl_n = "next"
-ctrl_p = "prev"
-ctrl_h = "backspace"
-ctrl_m = "commit"
+[general]
+keybind_preset = "none"
 ```
 
-### Vim 風にカスタマイズした例
+### Minimal プリセット（競合の少ないキーのみ）
 
 ```toml
-[keybind]
-# Ctrl+J/K で候補移動、Ctrl+L で確定
-ctrl_j = "next"
-ctrl_k = "prev"          # ※ ctrl_k は将来拡張で対応
-ctrl_l = "commit"        # ※ ctrl_l は将来拡張で対応
-ctrl_g = "cancel"
-ctrl_h = "backspace"
-ctrl_m = "commit"
-ctrl_n = "none"          # Ctrl+N を無効化（OS に委ねる）
-ctrl_p = "none"          # Ctrl+P を無効化（OS に委ねる）
+[general]
+keybind_preset = "minimal"
 ```
 
-### Emacs キーバインドを完全に無効化した例
+### Emacs プリセット（フルセット、OS ショートカットを上書き）
 
 ```toml
+[general]
+keybind_preset = "emacs"
+```
+
+### Emacs ベースで Ctrl+N/P だけ無効化
+
+```toml
+[general]
+keybind_preset = "emacs"
+
 [keybind]
-ctrl_j = "none"
-ctrl_g = "none"
 ctrl_n = "none"
 ctrl_p = "none"
-ctrl_h = "none"
-ctrl_m = "none"
+```
+
+### None ベースで Ctrl+J だけ有効化
+
+```toml
+[general]
+keybind_preset = "none"
+
+[keybind]
+ctrl_j = "commit"
+```
+
+### 独自カスタマイズ（Ctrl+J/K で候補移動）
+
+```toml
+[general]
+keybind_preset = "minimal"
+
+[keybind]
+ctrl_j = "next"
+ctrl_k = "prev"          # ※ ctrl_k は将来拡張で対応
+ctrl_m = "commit"
 ```
 
 ## 注意事項
 
 - **EngineCommand の追加は不要。** 既存の `Commit`, `Cancel`, `NextCandidate`, `PrevCandidate`, `Backspace`, `Convert` をそのまま使う。新しいキーバインドは「入力経路の追加」であり、エンジンの変更は不要。
+- **デフォルトは `"none"` プリセット。** 既存ユーザーへの影響を避けるため、明示的に有効化しない限り Ctrl+キーは全て OS に委ねる。
 - **Alt+キーは対象外。** `modifiers.alt == true` の場合は引き続き `None` を返す。Alt キーの組み合わせは OS のメニューショートカットと競合するため。
 - **Ctrl+Alt の組み合わせも対象外。** 一部の言語レイアウトでは `Ctrl+Alt` が `AltGr` として使われるため、`ctrl && alt` が同時に `true` の場合は `None` を返す。
 - **Ctrl+C は対象外。** OS のコピー操作と競合するため、`ctrl_c` フィールドは設けない。
 - **`InsertChar` は割り当て不可。** Ctrl+キーに文字入力を割り当てることは意味がないため、設定値に `"insert_char"` は含めない。
-- **将来の拡張性:** カーソル移動（`Ctrl+A/E/F/B`）は `EngineCommand` の拡張が必要なため、Composing 状態でのカーソル移動機能と合わせて別フェーズで実装する。その際、`CtrlKeyConfig` に `ctrl_a`, `ctrl_b`, `ctrl_e`, `ctrl_f` フィールドは既に用意されており、拡張が容易。
-- **Phase 6 との連携:** `config.rs` の `Config` 構造体に `keybind: CtrlKeyConfig` を追加する。Phase 6 未実装の場合は `CtrlKeyConfig::default()` をハードコードして使用し、Phase 6 実装時に `Config` から取得するよう切り替える。
+- **将来の拡張性:** カーソル移動（`Ctrl+A/E/F/B`）は `EngineCommand` の拡張が必要なため、Composing 状態でのカーソル移動機能と合わせて別フェーズで実装する。その際、`CtrlKeyConfig` にフィールドを追加し、プリセットにもカーソル移動用のバリエーションを追加すれば対応可能。
+- **Phase 6 との連携:** `config.rs` の `Config` 構造体に `keybind_preset: KeybindPreset` と `keybind: CtrlKeyConfig` を追加する。Phase 6 未実装の場合は `CtrlKeyConfig::default()`（= `"none"` プリセット）をハードコードして使用し、Phase 6 実装時に `Config` から取得するよう切り替える。
