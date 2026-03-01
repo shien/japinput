@@ -57,27 +57,44 @@ fn main() {
             engine.process(EngineCommand::InsertChar(ch));
         }
 
-        // Convert 前にひらがなを取得（Commit でひらがな確定→取得）
-        let composing_output = engine.process(EngineCommand::Commit);
-        let hiragana = composing_output.committed;
-        let katakana_display = katakana::to_katakana(&hiragana);
-        let _ = writeln!(stdout, "  ひらがな: {hiragana}");
-        let _ = writeln!(stdout, "  カタカナ: {katakana_display}");
-
-        // 辞書がある場合は再度入力して変換を試行
+        // 辞書ありの場合: Convert → 候補があれば表示してから Commit
+        // 辞書なしの場合: Commit でひらがな確定
         if has_dict {
-            for ch in line.chars() {
-                engine.process(EngineCommand::InsertChar(ch));
-            }
             let output = engine.process(EngineCommand::Convert);
+            if engine.candidates().is_some() {
+                // 候補あり: reading からひらがな・カタカナを表示
+                let hiragana = engine.reading().to_string();
+                let katakana_display = katakana::to_katakana(&hiragana);
+                let _ = writeln!(stdout, "  ひらがな: {hiragana}");
+                let _ = writeln!(stdout, "  カタカナ: {katakana_display}");
 
-            if let Some(ref candidates) = output.candidates {
-                let _ = writeln!(stdout, "  変換候補: {}", candidates.join(" / "));
+                let candidates = engine.candidates().unwrap();
+                let _ = writeln!(
+                    stdout,
+                    "  変換候補: {}",
+                    candidates
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" / ")
+                );
+
                 let commit_output = engine.process(EngineCommand::Commit);
                 let _ = writeln!(stdout, "  確定: {}", commit_output.committed);
             } else {
+                // 候補なし: Convert がひらがなを自動確定
+                let hiragana = &output.committed;
+                let katakana_display = katakana::to_katakana(hiragana);
+                let _ = writeln!(stdout, "  ひらがな: {hiragana}");
+                let _ = writeln!(stdout, "  カタカナ: {katakana_display}");
                 let _ = writeln!(stdout, "  変換候補: (なし)");
             }
+        } else {
+            let output = engine.process(EngineCommand::Commit);
+            let hiragana = &output.committed;
+            let katakana_display = katakana::to_katakana(hiragana);
+            let _ = writeln!(stdout, "  ひらがな: {hiragana}");
+            let _ = writeln!(stdout, "  カタカナ: {katakana_display}");
         }
 
         let _ = writeln!(stdout);

@@ -3,6 +3,9 @@
 //! ローマ字入力を1文字ずつ受け取り、確定したひらがなと
 //! まだ確定していない入力バッファを返す。
 
+use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
+
 /// ローマ字→ひらがな変換テーブルのエントリ
 struct RomajiEntry {
     romaji: &'static str,
@@ -626,19 +629,33 @@ pub struct ConversionResult {
     pub pending: String,
 }
 
-/// 指定のバッファに対してテーブルの先頭からマッチするかチェックする。
-/// バッファがエントリの先頭と一致するが完全一致でない場合、まだ確定しない。
-fn try_match(buffer: &str) -> MatchResult {
-    let mut full_match = None;
-    let mut has_longer_partial = false;
+/// 完全一致マップ: romaji → hiragana
+static FULL_MATCH_MAP: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+    ROMAJI_TABLE
+        .iter()
+        .map(|e| (e.romaji, e.hiragana))
+        .collect()
+});
 
+/// 部分一致セット: エントリの全ての「真の接頭辞」を保持。
+/// 例: "sha" → {"s", "sh"} を登録。エントリ自身は含まない。
+static PREFIX_SET: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    let mut set = HashSet::new();
     for entry in ROMAJI_TABLE {
-        if buffer == entry.romaji {
-            full_match = Some(entry.hiragana);
-        } else if entry.romaji.starts_with(buffer) {
-            has_longer_partial = true;
+        let romaji = entry.romaji;
+        // romaji の各真の接頭辞を登録
+        for len in 1..romaji.len() {
+            set.insert(&romaji[..len]);
         }
     }
+    set
+});
+
+/// 指定のバッファに対して O(1) でマッチ判定する。
+/// バッファがエントリの真の接頭辞の場合は Partial（入力途中）。
+fn try_match(buffer: &str) -> MatchResult {
+    let has_longer_partial = PREFIX_SET.contains(buffer);
+    let full_match = FULL_MATCH_MAP.get(buffer).copied();
 
     // より長いエントリが存在する場合は確定せず待機する。
     // これにより "n" は "na","ni" 等の可能性があるため即座に「ん」にならない。

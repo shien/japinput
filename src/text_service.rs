@@ -22,6 +22,9 @@ enum EditAction {
     SetText(String),
     /// テキストを確定して Composition を終了する。
     CommitText(String),
+    /// テキストを確定して Composition を終了し、直後に新しい Composition を開始する。
+    /// Converting 中の InsertChar で候補確定と新規入力を同一セッションで処理する。
+    CommitAndCompose { committed: String, display: String },
     /// Composition を終了する。
     EndComposition,
 }
@@ -97,6 +100,18 @@ impl ITfEditSession_Impl for EditSession_Impl {
                 self.write_text(ec, text)?;
                 self.finish_composition(ec)?;
             }
+            EditAction::CommitAndCompose {
+                committed,
+                display,
+            } => {
+                // 1. 現在の候補を確定して Composition を終了
+                self.ensure_composition(ec)?;
+                self.write_text(ec, committed)?;
+                self.finish_composition(ec)?;
+                // 2. 新しい Composition を開始して次の入力を表示
+                self.ensure_composition(ec)?;
+                self.write_text(ec, display)?;
+            }
             EditAction::EndComposition => {
                 self.finish_composition(ec)?;
             }
@@ -160,7 +175,13 @@ impl TextService {
 
     /// EngineOutput に基づいて EditSession を発行し、Composition を更新する。
     fn update_composition(&self, context: &ITfContext, output: &EngineOutput) -> Result<()> {
-        let action = if !output.committed.is_empty() {
+        let action = if !output.committed.is_empty() && !output.display.is_empty() {
+            // 候補確定と新規入力が同時に発生（例: Converting 中の InsertChar）
+            EditAction::CommitAndCompose {
+                committed: output.committed.clone(),
+                display: output.display.clone(),
+            }
+        } else if !output.committed.is_empty() {
             EditAction::CommitText(output.committed.clone())
         } else if !output.display.is_empty() {
             EditAction::SetText(output.display.clone())

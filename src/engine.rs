@@ -44,8 +44,6 @@ pub struct EngineOutput {
     pub committed: String,
     /// 現在の表示用テキスト（未確定文字列 or 選択中の候補）
     pub display: String,
-    /// 候補リスト（Converting 状態のとき Some）
-    pub candidates: Option<Vec<String>>,
     /// 候補リスト内の選択インデックス
     pub candidate_index: Option<usize>,
 }
@@ -56,6 +54,8 @@ pub struct ConversionEngine {
     input: InputState,
     dict: Option<Dictionary>,
     candidates: Option<CandidateList>,
+    /// 変換時の読み（ひらがな）を保持する。
+    reading: String,
 }
 
 impl ConversionEngine {
@@ -66,12 +66,23 @@ impl ConversionEngine {
             input: InputState::new(),
             dict,
             candidates: None,
+            reading: String::new(),
         }
     }
 
     /// 現在の状態を返す。
     pub fn state(&self) -> EngineState {
         self.state
+    }
+
+    /// 変換候補リストを返す（Converting 状態のとき Some）。
+    pub fn candidates(&self) -> Option<&[String]> {
+        self.candidates.as_ref().map(|cl| cl.candidates())
+    }
+
+    /// 変換時の読み（ひらがな）を返す。
+    pub fn reading(&self) -> &str {
+        &self.reading
     }
 
     /// コマンドを処理し、結果を返す。
@@ -99,7 +110,6 @@ impl ConversionEngine {
                 EngineOutput {
                     committed,
                     display: String::new(),
-                    candidates: None,
                     candidate_index: None,
                 }
             }
@@ -143,7 +153,6 @@ impl ConversionEngine {
                 EngineOutput {
                     committed,
                     display: String::new(),
-                    candidates: None,
                     candidate_index: None,
                 }
             }
@@ -152,7 +161,30 @@ impl ConversionEngine {
                 self.state = EngineState::Composing;
                 self.composing_output()
             }
-            (EngineState::Converting, _) => self.converting_output(),
+            (EngineState::Converting, EngineCommand::InsertChar(ch)) => {
+                // 現在の候補を確定し、新しい文字で Composing を開始する
+                let committed = self
+                    .candidates
+                    .as_ref()
+                    .and_then(|cl| cl.select())
+                    .unwrap_or_default();
+                self.candidates = None;
+                self.input.reset();
+                self.input.feed_char(*ch);
+                self.state = EngineState::Composing;
+                let composing = self.composing_output();
+                EngineOutput {
+                    committed,
+                    display: composing.display,
+                    candidate_index: None,
+                }
+            }
+            (EngineState::Converting, EngineCommand::Backspace) => {
+                // 変換をキャンセルして Composing に戻る（Cancel と同じ動作）
+                self.candidates = None;
+                self.state = EngineState::Composing;
+                self.composing_output()
+            }
         }
     }
 
@@ -160,6 +192,7 @@ impl ConversionEngine {
     fn do_convert(&mut self) -> EngineOutput {
         self.input.flush();
         let hiragana = self.input.output().to_string();
+        self.reading = hiragana.clone();
 
         let candidates = self
             .dict
@@ -171,14 +204,12 @@ impl ConversionEngine {
             Some(cands) if !cands.is_empty() => {
                 let cl = CandidateList::new(cands);
                 let display = cl.current().unwrap_or("").to_string();
-                let all = cl.candidates().to_vec();
                 let idx = cl.index();
                 self.candidates = Some(cl);
                 self.state = EngineState::Converting;
                 EngineOutput {
                     committed: String::new(),
                     display,
-                    candidates: Some(all),
                     candidate_index: Some(idx),
                 }
             }
@@ -190,7 +221,6 @@ impl ConversionEngine {
                 EngineOutput {
                     committed,
                     display: String::new(),
-                    candidates: None,
                     candidate_index: None,
                 }
             }
@@ -203,7 +233,6 @@ impl ConversionEngine {
         EngineOutput {
             committed: String::new(),
             display,
-            candidates: None,
             candidate_index: None,
         }
     }
@@ -214,7 +243,6 @@ impl ConversionEngine {
             Some(cl) => EngineOutput {
                 committed: String::new(),
                 display: cl.current().unwrap_or("").to_string(),
-                candidates: Some(cl.candidates().to_vec()),
                 candidate_index: Some(cl.index()),
             },
             None => self.empty_output(),
@@ -226,7 +254,6 @@ impl ConversionEngine {
         EngineOutput {
             committed: String::new(),
             display: String::new(),
-            candidates: None,
             candidate_index: None,
         }
     }
@@ -271,9 +298,9 @@ mod tests {
         for ch in "kanji".chars() {
             engine.process(EngineCommand::InsertChar(ch));
         }
-        let output = engine.process(EngineCommand::Convert);
+        engine.process(EngineCommand::Convert);
         assert_eq!(engine.state(), EngineState::Converting);
-        assert!(output.candidates.is_some());
+        assert!(engine.candidates().is_some());
     }
 
     // === Converting → Direct (Commit) ===
@@ -436,6 +463,63 @@ mod tests {
         assert_eq!(engine.state(), EngineState::Composing);
     }
 
+    // === Converting で InsertChar → 自動確定+新規入力 ===
+
+    #[test]
+    fn insert_char_in_converting_auto_commits() {
+        // "kanji" → Convert → 'a' → 候補「漢字」が確定され、'a' の入力が開始
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::Convert); // Converting, display="漢字"
+        let output = engine.process(EngineCommand::InsertChar('a'));
+        assert_eq!(output.committed, "漢字");
+        assert_eq!(engine.state(), EngineState::Composing);
+        assert_eq!(output.display, "あ");
+    }
+
+    #[test]
+    fn insert_char_in_converting_after_next() {
+        // 2番目の候補を選択中に文字入力 → 2番目の候補が確定
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::Convert);
+        engine.process(EngineCommand::NextCandidate); // "感じ"
+        let output = engine.process(EngineCommand::InsertChar('k'));
+        assert_eq!(output.committed, "感じ");
+        assert_eq!(engine.state(), EngineState::Composing);
+        assert_eq!(output.display, "k");
+    }
+
+    // === Converting で Backspace → Composing に戻る ===
+
+    #[test]
+    fn backspace_in_converting_returns_to_composing() {
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::Convert);
+        let output = engine.process(EngineCommand::Backspace);
+        assert_eq!(engine.state(), EngineState::Composing);
+        assert_eq!(output.display, "かんじ");
+    }
+
+    // === reading() getter ===
+
+    #[test]
+    fn reading_available_after_convert() {
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::Convert);
+        assert_eq!(engine.reading(), "かんじ");
+    }
+
     // === 辞書なし / 候補なしでの変換 ===
 
     #[test]
@@ -471,7 +555,7 @@ mod tests {
         }
         let output = engine.process(EngineCommand::Convert);
         assert_eq!(output.display, "漢字");
-        assert!(output.candidates.is_some());
+        assert!(engine.candidates().is_some());
 
         let output = engine.process(EngineCommand::Commit);
         assert_eq!(output.committed, "漢字");
