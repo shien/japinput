@@ -20,6 +20,12 @@ pub const VK_DOWN: u16 = 0x28;
 pub const VK_0: u16 = 0x30;
 pub const VK_9: u16 = 0x39;
 pub const VK_A: u16 = 0x41;
+pub const VK_G: u16 = 0x47;
+pub const VK_H: u16 = 0x48;
+pub const VK_J: u16 = 0x4A;
+pub const VK_M: u16 = 0x4D;
+pub const VK_N: u16 = 0x4E;
+pub const VK_P: u16 = 0x50;
 pub const VK_Z: u16 = 0x5A;
 pub const VK_F1: u16 = 0x70;
 pub const VK_OEM_COMMA: u16 = 0xBC;
@@ -66,6 +72,77 @@ impl Modifiers {
             alt: true,
         }
     }
+
+    pub fn ctrl_alt() -> Self {
+        Self {
+            shift: false,
+            ctrl: true,
+            alt: true,
+        }
+    }
+}
+
+// === キーバインドプリセット ===
+
+/// キーバインドプリセット。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeybindPreset {
+    /// Ctrl+キー割り当てなし（デフォルト）
+    None,
+    /// 競合の少ないキーのみ (Ctrl+J, Ctrl+G, Ctrl+M)
+    Minimal,
+    /// Emacs フルセット (Ctrl+J/G/N/P/H/M)
+    Emacs,
+}
+
+/// Ctrl+キーの割り当て設定。
+/// 各フィールドが None の場合、そのキーは OS に処理を委ねる。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CtrlKeyConfig {
+    pub ctrl_g: Option<EngineCommand>,
+    pub ctrl_h: Option<EngineCommand>,
+    pub ctrl_j: Option<EngineCommand>,
+    pub ctrl_m: Option<EngineCommand>,
+    pub ctrl_n: Option<EngineCommand>,
+    pub ctrl_p: Option<EngineCommand>,
+}
+
+impl CtrlKeyConfig {
+    /// プリセットからキーバインド設定を生成する。
+    pub fn from_preset(preset: &KeybindPreset) -> Self {
+        match preset {
+            KeybindPreset::None => Self {
+                ctrl_g: None,
+                ctrl_h: None,
+                ctrl_j: None,
+                ctrl_m: None,
+                ctrl_n: None,
+                ctrl_p: None,
+            },
+            KeybindPreset::Minimal => Self {
+                ctrl_g: Some(EngineCommand::Cancel),
+                ctrl_h: None,
+                ctrl_j: Some(EngineCommand::Commit),
+                ctrl_m: Some(EngineCommand::Commit),
+                ctrl_n: None,
+                ctrl_p: None,
+            },
+            KeybindPreset::Emacs => Self {
+                ctrl_g: Some(EngineCommand::Cancel),
+                ctrl_h: Some(EngineCommand::Backspace),
+                ctrl_j: Some(EngineCommand::Commit),
+                ctrl_m: Some(EngineCommand::Commit),
+                ctrl_n: Some(EngineCommand::NextCandidate),
+                ctrl_p: Some(EngineCommand::PrevCandidate),
+            },
+        }
+    }
+}
+
+impl Default for CtrlKeyConfig {
+    fn default() -> Self {
+        Self::from_preset(&KeybindPreset::None)
+    }
 }
 
 /// 仮想キーコードと修飾キー状態を EngineCommand に変換する。
@@ -73,15 +150,27 @@ impl Modifiers {
 /// - `vk`: Windows 仮想キーコード
 /// - `modifiers`: 修飾キーの状態
 /// - `ime_on`: IME がオンかどうか
+/// - `ctrl_config`: Ctrl+キーの割り当て設定
 ///
 /// 戻り値: 対応する EngineCommand。処理しないキーの場合は None。
-pub fn map_key(vk: u16, modifiers: &Modifiers, ime_on: bool) -> Option<EngineCommand> {
+pub fn map_key(
+    vk: u16,
+    modifiers: &Modifiers,
+    ime_on: bool,
+    ctrl_config: &CtrlKeyConfig,
+) -> Option<EngineCommand> {
     if !ime_on {
         return None;
     }
 
-    if modifiers.ctrl || modifiers.alt {
+    // Alt は常に OS に委ねる
+    if modifiers.alt {
         return None;
+    }
+
+    // Ctrl+キー: 設定に基づくマッピング
+    if modifiers.ctrl {
+        return map_ctrl_key(vk, ctrl_config);
     }
 
     match vk {
@@ -111,23 +200,212 @@ pub fn map_key(vk: u16, modifiers: &Modifiers, ime_on: bool) -> Option<EngineCom
     }
 }
 
+/// Ctrl+キーを設定に基づいて EngineCommand に変換する。
+fn map_ctrl_key(vk: u16, config: &CtrlKeyConfig) -> Option<EngineCommand> {
+    match vk {
+        VK_G => config.ctrl_g.clone(),
+        VK_H => config.ctrl_h.clone(),
+        VK_J => config.ctrl_j.clone(),
+        VK_M => config.ctrl_m.clone(),
+        VK_N => config.ctrl_n.clone(),
+        VK_P => config.ctrl_p.clone(),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::engine::EngineCommand;
 
+    // === プリセット ===
+
+    #[test]
+    fn preset_none_all_disabled() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::None);
+        assert_eq!(config.ctrl_j, None);
+        assert_eq!(config.ctrl_g, None);
+        assert_eq!(config.ctrl_n, None);
+        assert_eq!(config.ctrl_p, None);
+        assert_eq!(config.ctrl_h, None);
+        assert_eq!(config.ctrl_m, None);
+    }
+
+    #[test]
+    fn preset_minimal_only_safe_keys() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Minimal);
+        assert_eq!(config.ctrl_j, Some(EngineCommand::Commit));
+        assert_eq!(config.ctrl_g, Some(EngineCommand::Cancel));
+        assert_eq!(config.ctrl_m, Some(EngineCommand::Commit));
+        // 競合しやすいキーは無効
+        assert_eq!(config.ctrl_n, None);
+        assert_eq!(config.ctrl_p, None);
+        assert_eq!(config.ctrl_h, None);
+    }
+
+    #[test]
+    fn preset_emacs_all_enabled() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        assert_eq!(config.ctrl_j, Some(EngineCommand::Commit));
+        assert_eq!(config.ctrl_g, Some(EngineCommand::Cancel));
+        assert_eq!(config.ctrl_n, Some(EngineCommand::NextCandidate));
+        assert_eq!(config.ctrl_p, Some(EngineCommand::PrevCandidate));
+        assert_eq!(config.ctrl_h, Some(EngineCommand::Backspace));
+        assert_eq!(config.ctrl_m, Some(EngineCommand::Commit));
+    }
+
+    #[test]
+    fn default_is_none_preset() {
+        let default = CtrlKeyConfig::default();
+        let none = CtrlKeyConfig::from_preset(&KeybindPreset::None);
+        assert_eq!(default, none);
+    }
+
+    // === map_key: Emacs プリセット ===
+
+    #[test]
+    fn emacs_ctrl_j_commits() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let cmd = map_key(VK_J, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::Commit));
+    }
+
+    #[test]
+    fn emacs_ctrl_g_cancels() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let cmd = map_key(VK_G, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::Cancel));
+    }
+
+    #[test]
+    fn emacs_ctrl_n_next_candidate() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let cmd = map_key(VK_N, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::NextCandidate));
+    }
+
+    #[test]
+    fn emacs_ctrl_p_prev_candidate() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let cmd = map_key(VK_P, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::PrevCandidate));
+    }
+
+    #[test]
+    fn emacs_ctrl_h_backspace() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let cmd = map_key(VK_H, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::Backspace));
+    }
+
+    #[test]
+    fn emacs_ctrl_m_commits() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let cmd = map_key(VK_M, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::Commit));
+    }
+
+    // === map_key: Minimal プリセット ===
+
+    #[test]
+    fn minimal_ctrl_j_commits() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Minimal);
+        let cmd = map_key(VK_J, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::Commit));
+    }
+
+    #[test]
+    fn minimal_ctrl_n_returns_none() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Minimal);
+        let cmd = map_key(VK_N, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, None);
+    }
+
+    #[test]
+    fn minimal_ctrl_p_returns_none() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Minimal);
+        let cmd = map_key(VK_P, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, None);
+    }
+
+    #[test]
+    fn minimal_ctrl_h_returns_none() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Minimal);
+        let cmd = map_key(VK_H, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, None);
+    }
+
+    // === map_key: None プリセット ===
+
+    #[test]
+    fn none_preset_ctrl_j_returns_none() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::None);
+        let cmd = map_key(VK_J, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, None);
+    }
+
+    // === map_key: 共通 ===
+
+    #[test]
+    fn ctrl_other_returns_none() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let cmd = map_key(VK_A, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, None);
+    }
+
+    #[test]
+    fn ctrl_alt_returns_none() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let cmd = map_key(VK_J, &Modifiers::ctrl_alt(), true, &config);
+        assert_eq!(cmd, None);
+    }
+
+    // === カスタム設定（プリセット + 個別上書き） ===
+
+    #[test]
+    fn emacs_override_ctrl_n_none() {
+        let mut config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        config.ctrl_n = None;
+        let cmd = map_key(VK_N, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, None);
+        // 他のキーは影響なし
+        let cmd = map_key(VK_J, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::Commit));
+    }
+
+    #[test]
+    fn none_override_ctrl_j_commit() {
+        let mut config = CtrlKeyConfig::from_preset(&KeybindPreset::None);
+        config.ctrl_j = Some(EngineCommand::Commit);
+        let cmd = map_key(VK_J, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::Commit));
+        // 他は引き続き無効
+        let cmd = map_key(VK_G, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, None);
+    }
+
+    #[test]
+    fn minimal_override_ctrl_h_backspace() {
+        let mut config = CtrlKeyConfig::from_preset(&KeybindPreset::Minimal);
+        config.ctrl_h = Some(EngineCommand::Backspace);
+        let cmd = map_key(VK_H, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::Backspace));
+    }
+
     // === アルファベットキー ===
 
     #[test]
     fn alphabet_key_lowercase() {
-        let cmd = map_key(VK_A, &Modifiers::none(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_A, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::InsertChar('a')));
     }
 
     #[test]
     fn alphabet_key_all_letters() {
+        let config = CtrlKeyConfig::default();
         for vk in VK_A..=VK_Z {
-            let cmd = map_key(vk, &Modifiers::none(), true);
+            let cmd = map_key(vk, &Modifiers::none(), true, &config);
             let expected_char = (b'a' + (vk - VK_A) as u8) as char;
             assert_eq!(cmd, Some(EngineCommand::InsertChar(expected_char)));
         }
@@ -137,37 +415,43 @@ mod tests {
 
     #[test]
     fn space_key_converts() {
-        let cmd = map_key(VK_SPACE, &Modifiers::none(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_SPACE, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::Convert));
     }
 
     #[test]
     fn enter_key_commits() {
-        let cmd = map_key(VK_RETURN, &Modifiers::none(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_RETURN, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::Commit));
     }
 
     #[test]
     fn escape_key_cancels() {
-        let cmd = map_key(VK_ESCAPE, &Modifiers::none(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_ESCAPE, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::Cancel));
     }
 
     #[test]
     fn backspace_key() {
-        let cmd = map_key(VK_BACK, &Modifiers::none(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_BACK, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::Backspace));
     }
 
     #[test]
     fn down_arrow_next_candidate() {
-        let cmd = map_key(VK_DOWN, &Modifiers::none(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_DOWN, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::NextCandidate));
     }
 
     #[test]
     fn up_arrow_prev_candidate() {
-        let cmd = map_key(VK_UP, &Modifiers::none(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_UP, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::PrevCandidate));
     }
 
@@ -175,33 +459,39 @@ mod tests {
 
     #[test]
     fn ime_off_returns_none() {
-        let cmd = map_key(VK_A, &Modifiers::none(), false);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_A, &Modifiers::none(), false, &config);
         assert_eq!(cmd, None);
     }
 
     #[test]
     fn ime_off_space_returns_none() {
-        let cmd = map_key(VK_SPACE, &Modifiers::none(), false);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_SPACE, &Modifiers::none(), false, &config);
         assert_eq!(cmd, None);
     }
 
     // === 修飾キー ===
 
     #[test]
-    fn ctrl_key_returns_none() {
-        let cmd = map_key(VK_A, &Modifiers::ctrl(), true);
+    fn ctrl_key_with_default_returns_none() {
+        // デフォルト (None プリセット) では Ctrl+A は None
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_A, &Modifiers::ctrl(), true, &config);
         assert_eq!(cmd, None);
     }
 
     #[test]
     fn alt_key_returns_none() {
-        let cmd = map_key(VK_A, &Modifiers::alt(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_A, &Modifiers::alt(), true, &config);
         assert_eq!(cmd, None);
     }
 
     #[test]
     fn shift_alphabet_uppercase() {
-        let cmd = map_key(VK_A, &Modifiers::shift(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_A, &Modifiers::shift(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::InsertChar('A')));
     }
 
@@ -209,7 +499,8 @@ mod tests {
 
     #[test]
     fn function_keys_return_none() {
-        let cmd = map_key(VK_F1, &Modifiers::none(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_F1, &Modifiers::none(), true, &config);
         assert_eq!(cmd, None);
     }
 
@@ -217,20 +508,23 @@ mod tests {
 
     #[test]
     fn number_key_0() {
-        let cmd = map_key(VK_0, &Modifiers::none(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_0, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::InsertChar('0')));
     }
 
     #[test]
     fn number_key_9() {
-        let cmd = map_key(VK_9, &Modifiers::none(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_9, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::InsertChar('9')));
     }
 
     #[test]
     fn number_keys_all() {
+        let config = CtrlKeyConfig::default();
         for vk in VK_0..=VK_9 {
-            let cmd = map_key(vk, &Modifiers::none(), true);
+            let cmd = map_key(vk, &Modifiers::none(), true, &config);
             let expected_char = (b'0' + (vk - VK_0) as u8) as char;
             assert_eq!(cmd, Some(EngineCommand::InsertChar(expected_char)));
         }
@@ -239,7 +533,8 @@ mod tests {
     #[test]
     fn number_key_with_shift_returns_none() {
         // Shift+数字はシステムに処理を委ねる（! @ # 等）
-        let cmd = map_key(VK_0, &Modifiers::shift(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_0, &Modifiers::shift(), true, &config);
         assert_eq!(cmd, None);
     }
 
@@ -247,19 +542,22 @@ mod tests {
 
     #[test]
     fn minus_key_inserts_minus() {
-        let cmd = map_key(VK_OEM_MINUS, &Modifiers::none(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_OEM_MINUS, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::InsertChar('-')));
     }
 
     #[test]
     fn period_key_inserts_period() {
-        let cmd = map_key(VK_OEM_PERIOD, &Modifiers::none(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_OEM_PERIOD, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::InsertChar('.')));
     }
 
     #[test]
     fn comma_key_inserts_comma() {
-        let cmd = map_key(VK_OEM_COMMA, &Modifiers::none(), true);
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_OEM_COMMA, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::InsertChar(',')));
     }
 }

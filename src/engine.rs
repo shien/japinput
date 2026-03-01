@@ -625,4 +625,97 @@ mod tests {
         let output = engine.process(EngineCommand::InsertChar('n'));
         assert_eq!(output.display, "かn"); // output + pending
     }
+
+    // === Emacs キーバインド統合テスト ===
+    //
+    // key_mapping のユニットテストに加え、エンジン経由で
+    // Emacs キーバインドのコマンドが正しく動作することを確認する。
+    // ここでは EngineCommand を直接渡すため key_mapping は経由しないが、
+    // Ctrl+キーで発行されるコマンドがエンジンの各状態で正しく処理されることを検証する。
+
+    #[test]
+    fn emacs_ctrl_j_composing_commits_hiragana() {
+        // Composing 状態で Commit (Ctrl+J 相当) → ひらがな確定 → Direct
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        assert_eq!(engine.state(), EngineState::Composing);
+        let output = engine.process(EngineCommand::Commit);
+        assert_eq!(engine.state(), EngineState::Direct);
+        assert_eq!(output.committed, "かんじ");
+    }
+
+    #[test]
+    fn emacs_ctrl_j_converting_commits_candidate() {
+        // Converting 状態で Commit (Ctrl+J 相当) → 候補確定 → Direct
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::Convert);
+        assert_eq!(engine.state(), EngineState::Converting);
+        let output = engine.process(EngineCommand::Commit);
+        assert_eq!(engine.state(), EngineState::Direct);
+        assert_eq!(output.committed, "漢字");
+    }
+
+    #[test]
+    fn emacs_ctrl_g_composing_cancels() {
+        // Composing 状態で Cancel (Ctrl+G 相当) → 入力破棄 → Direct
+        let mut engine = test_engine();
+        for ch in "ka".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        assert_eq!(engine.state(), EngineState::Composing);
+        let output = engine.process(EngineCommand::Cancel);
+        assert_eq!(engine.state(), EngineState::Direct);
+        assert_eq!(output.committed, "");
+        assert_eq!(output.display, "");
+    }
+
+    #[test]
+    fn emacs_ctrl_g_converting_returns_to_composing() {
+        // Converting 状態で Cancel (Ctrl+G 相当) → Composing に戻る
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::Convert);
+        assert_eq!(engine.state(), EngineState::Converting);
+        let output = engine.process(EngineCommand::Cancel);
+        assert_eq!(engine.state(), EngineState::Composing);
+        assert_eq!(output.display, "かんじ");
+    }
+
+    #[test]
+    fn emacs_ctrl_n_p_converting_navigates() {
+        // Converting 状態で NextCandidate/PrevCandidate (Ctrl+N/P 相当) → 候補移動
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::Convert);
+        // Ctrl+N → 次の候補
+        let output = engine.process(EngineCommand::NextCandidate);
+        assert_eq!(output.candidate_index, Some(1));
+        assert_eq!(output.display, "感じ");
+        // Ctrl+P → 前の候補に戻る
+        let output = engine.process(EngineCommand::PrevCandidate);
+        assert_eq!(output.candidate_index, Some(0));
+        assert_eq!(output.display, "漢字");
+    }
+
+    #[test]
+    fn emacs_ctrl_h_composing_backspace() {
+        // Composing 状態で Backspace (Ctrl+H 相当) → 1文字削除
+        let mut engine = test_engine();
+        for ch in "kak".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        // output="か", pending="k"
+        let output = engine.process(EngineCommand::Backspace);
+        assert_eq!(output.display, "か");
+        assert_eq!(engine.state(), EngineState::Composing);
+    }
 }

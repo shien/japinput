@@ -12,7 +12,7 @@ use windows::core::*;
 
 use crate::dictionary::Dictionary;
 use crate::engine::{ConversionEngine, EngineOutput};
-use crate::key_mapping::{self, Modifiers};
+use crate::key_mapping::{self, CtrlKeyConfig, Modifiers};
 
 // === EditSession ===
 
@@ -100,10 +100,7 @@ impl ITfEditSession_Impl for EditSession_Impl {
                 self.write_text(ec, text)?;
                 self.finish_composition(ec)?;
             }
-            EditAction::CommitAndCompose {
-                committed,
-                display,
-            } => {
+            EditAction::CommitAndCompose { committed, display } => {
                 // 1. 現在の候補を確定して Composition を終了
                 self.ensure_composition(ec)?;
                 self.write_text(ec, committed)?;
@@ -129,6 +126,7 @@ pub struct TextService {
     engine: Mutex<ConversionEngine>,
     ime_on: Mutex<bool>,
     composition: Arc<Mutex<Option<ITfComposition>>>,
+    ctrl_config: CtrlKeyConfig,
 }
 
 impl TextService {
@@ -140,6 +138,7 @@ impl TextService {
             engine: Mutex::new(ConversionEngine::new(dict)),
             ime_on: Mutex::new(false),
             composition: Arc::new(Mutex::new(None)),
+            ctrl_config: CtrlKeyConfig::default(),
         }
     }
 
@@ -278,7 +277,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
 
-        match key_mapping::map_key(vk, &modifiers, ime_on) {
+        match key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config) {
             Some(_) => Ok(TRUE),
             None => Ok(FALSE),
         }
@@ -289,7 +288,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
 
-        let Some(command) = key_mapping::map_key(vk, &modifiers, ime_on) else {
+        let Some(command) = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config) else {
             return Ok(FALSE);
         };
 
