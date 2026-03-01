@@ -1,4 +1,4 @@
-# japinput
+# Enpitsu
 
 Windows 向け日本語入力システム (IME)。
 
