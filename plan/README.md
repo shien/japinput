@@ -19,6 +19,7 @@ Windows 向け日本語入力システム (IME) を段階的に構築する。
 | [Phase 5](./phase5-candidate-ui.md) | 候補ウィンドウ UI | 変換候補をポップアップ表示 |
 | [Phase 6](./phase6-polish.md) | 仕上げ・インストーラー | 配布可能な状態 |
 | [Phase 7](./phase7-mecab.md) | MeCab/形態素解析による高機能変換 | 連文節変換・予測変換 |
+| [Phase 7.5](./phase7.5-emacs-keybind.md) | Emacs キーバインドの追加 | Ctrl+キーによるホームポジション操作 |
 | [Phase 8](./phase8-ai-dict.md) | AI 辞書・設定生成 | AI で生成した辞書・テーブルによるオフライン高機能化 |
 
 ## 方針

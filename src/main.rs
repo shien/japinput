@@ -1,6 +1,7 @@
 use japinput::dictionary::Dictionary;
 use japinput::engine::{ConversionEngine, EngineCommand};
 use japinput::katakana;
+use japinput::user_dictionary::UserDictionary;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 
@@ -27,8 +28,29 @@ fn main() {
         None
     };
 
+    // --user-dict オプションでユーザー辞書ファイルを指定
+    let user_dict_path = args
+        .iter()
+        .position(|a| a == "--user-dict")
+        .and_then(|pos| args.get(pos + 1).map(|s| s.as_str()));
+
+    let user_dict = if let Some(path) = user_dict_path {
+        match UserDictionary::load(Path::new(path)) {
+            Ok(ud) => {
+                eprintln!("ユーザー辞書を読み込みました: {path}");
+                Some(ud)
+            }
+            Err(e) => {
+                eprintln!("ユーザー辞書の読み込みに失敗: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let has_dict = dict.is_some();
-    let mut engine = ConversionEngine::new(dict);
+    let mut engine = ConversionEngine::new_with_user_dict(dict, user_dict);
 
     println!("japinput - ローマ字→かな変換デモ");
     if has_dict {
@@ -98,5 +120,16 @@ fn main() {
         }
 
         let _ = writeln!(stdout);
+    }
+
+    // ユーザー辞書の保存
+    if let Some(path) = user_dict_path
+        && let Some(ud) = engine.user_dict_mut()
+        && ud.is_dirty()
+    {
+        match ud.save(Path::new(path)) {
+            Ok(()) => eprintln!("ユーザー辞書を保存しました: {path}"),
+            Err(e) => eprintln!("ユーザー辞書の保存に失敗: {e}"),
+        }
     }
 }
