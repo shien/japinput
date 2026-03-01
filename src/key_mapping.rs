@@ -168,8 +168,11 @@ pub fn map_key(
         return None;
     }
 
-    // Ctrl+キー: 設定に基づくマッピング
+    // Ctrl+キー: 設定に基づくマッピング（Ctrl+Shift は OS に委ねる）
     if modifiers.ctrl {
+        if modifiers.shift {
+            return None;
+        }
         return map_ctrl_key(vk, ctrl_config);
     }
 
@@ -493,6 +496,46 @@ mod tests {
         let config = CtrlKeyConfig::default();
         let cmd = map_key(VK_A, &Modifiers::shift(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::InsertChar('A')));
+    }
+
+    // === Ctrl+Shift は OS に委ねる ===
+
+    #[test]
+    fn ctrl_shift_n_returns_none() {
+        // Ctrl+Shift+N はブラウザの新規シークレットウィンドウ等で使われる
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let mods = Modifiers {
+            shift: true,
+            ctrl: true,
+            alt: false,
+        };
+        let cmd = map_key(VK_N, &mods, true, &config);
+        assert_eq!(cmd, None);
+    }
+
+    #[test]
+    fn ctrl_shift_j_returns_none() {
+        // Ctrl+Shift+J はブラウザの DevTools 等で使われる
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let mods = Modifiers {
+            shift: true,
+            ctrl: true,
+            alt: false,
+        };
+        let cmd = map_key(VK_J, &mods, true, &config);
+        assert_eq!(cmd, None);
+    }
+
+    #[test]
+    fn ctrl_shift_p_returns_none() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let mods = Modifiers {
+            shift: true,
+            ctrl: true,
+            alt: false,
+        };
+        let cmd = map_key(VK_P, &mods, true, &config);
+        assert_eq!(cmd, None);
     }
 
     // === 処理しないキー ===
