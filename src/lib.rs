@@ -1,4 +1,5 @@
 pub mod candidate;
+pub mod config;
 pub mod dictionary;
 pub mod engine;
 pub mod guids;
@@ -6,6 +7,7 @@ pub mod input_state;
 pub mod katakana;
 pub mod key_mapping;
 pub mod romaji;
+pub mod user_dictionary;
 
 #[cfg(windows)]
 pub mod class_factory;

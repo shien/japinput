@@ -6,6 +6,7 @@
 use crate::candidate::CandidateList;
 use crate::dictionary::Dictionary;
 use crate::input_state::InputState;
+use crate::user_dictionary::UserDictionary;
 
 /// エンジンの状態。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +54,7 @@ pub struct ConversionEngine {
     state: EngineState,
     input: InputState,
     dict: Option<Dictionary>,
+    user_dict: Option<UserDictionary>,
     candidates: Option<CandidateList>,
     /// 変換時の読み（ひらがな）を保持する。
     reading: String,
@@ -65,9 +67,27 @@ impl ConversionEngine {
             state: EngineState::Direct,
             input: InputState::new(),
             dict,
+            user_dict: None,
             candidates: None,
             reading: String::new(),
         }
+    }
+
+    /// ユーザー辞書付きの変換エンジンを作成する。
+    pub fn new_with_user_dict(dict: Option<Dictionary>, user_dict: Option<UserDictionary>) -> Self {
+        Self {
+            state: EngineState::Direct,
+            input: InputState::new(),
+            dict,
+            user_dict,
+            candidates: None,
+            reading: String::new(),
+        }
+    }
+
+    /// ユーザー辞書の可変参照を返す。
+    pub fn user_dict_mut(&mut self) -> Option<&mut UserDictionary> {
+        self.user_dict.as_mut()
     }
 
     /// 現在の状態を返す。
@@ -147,6 +167,13 @@ impl ConversionEngine {
                     .as_ref()
                     .and_then(|cl| cl.select())
                     .unwrap_or_default();
+                // ユーザー辞書に学習データを記録
+                if let Some(ref mut ud) = self.user_dict
+                    && !committed.is_empty()
+                    && !self.reading.is_empty()
+                {
+                    ud.record(&self.reading, &committed);
+                }
                 self.candidates = None;
                 self.input.reset();
                 self.state = EngineState::Direct;
@@ -168,6 +195,13 @@ impl ConversionEngine {
                     .as_ref()
                     .and_then(|cl| cl.select())
                     .unwrap_or_default();
+                // ユーザー辞書に学習データを記録
+                if let Some(ref mut ud) = self.user_dict
+                    && !committed.is_empty()
+                    && !self.reading.is_empty()
+                {
+                    ud.record(&self.reading, &committed);
+                }
                 self.candidates = None;
                 self.input.reset();
                 self.input.feed_char(*ch);
@@ -194,37 +228,58 @@ impl ConversionEngine {
         let hiragana = self.input.output().to_string();
         self.reading = hiragana.clone();
 
-        let candidates = self
-            .dict
-            .as_ref()
-            .and_then(|d| d.lookup(&hiragana))
-            .map(|c| c.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        // ユーザー辞書とシステム辞書の候補をマージ
+        let merged = self.merge_candidates(&hiragana);
 
-        match candidates {
-            Some(cands) if !cands.is_empty() => {
-                let cl = CandidateList::new(cands);
-                let display = cl.current().unwrap_or("").to_string();
-                let idx = cl.index();
-                self.candidates = Some(cl);
-                self.state = EngineState::Converting;
-                EngineOutput {
-                    committed: String::new(),
-                    display,
-                    candidate_index: Some(idx),
-                }
+        if merged.is_empty() {
+            // 候補なし → ひらがなを確定
+            let committed = hiragana;
+            self.input.reset();
+            self.state = EngineState::Direct;
+            EngineOutput {
+                committed,
+                display: String::new(),
+                candidate_index: None,
             }
-            _ => {
-                // 候補なし → ひらがなを確定
-                let committed = hiragana;
-                self.input.reset();
-                self.state = EngineState::Direct;
-                EngineOutput {
-                    committed,
-                    display: String::new(),
-                    candidate_index: None,
-                }
+        } else {
+            let cl = CandidateList::new(merged);
+            let display = cl.current().unwrap_or("").to_string();
+            let idx = cl.index();
+            self.candidates = Some(cl);
+            self.state = EngineState::Converting;
+            EngineOutput {
+                committed: String::new(),
+                display,
+                candidate_index: Some(idx),
             }
         }
+    }
+
+    /// ユーザー辞書とシステム辞書の候補をマージする。
+    /// ユーザー辞書の候補を先頭に配置し、システム辞書の候補のうち
+    /// ユーザー辞書に含まれないものを後ろに追加する。
+    fn merge_candidates(&self, reading: &str) -> Vec<String> {
+        let user_cands: Vec<String> = self
+            .user_dict
+            .as_ref()
+            .and_then(|ud| ud.lookup(reading))
+            .map(|c| c.to_vec())
+            .unwrap_or_default();
+
+        let system_cands: Vec<String> = self
+            .dict
+            .as_ref()
+            .and_then(|d| d.lookup(reading))
+            .map(|c| c.iter().map(|s| s.to_string()).collect())
+            .unwrap_or_default();
+
+        let mut merged = user_cands;
+        for c in system_cands {
+            if !merged.contains(&c) {
+                merged.push(c);
+            }
+        }
+        merged
     }
 
     /// Composing 状態の EngineOutput を組み立てる。
@@ -717,5 +772,89 @@ mod tests {
         let output = engine.process(EngineCommand::Backspace);
         assert_eq!(output.display, "か");
         assert_eq!(engine.state(), EngineState::Composing);
+    }
+
+    // === ユーザー辞書連携 ===
+
+    fn test_engine_with_user_dict() -> ConversionEngine {
+        let dict = Dictionary::load_from_file(Path::new("tests/fixtures/test_dict.txt")).unwrap();
+        let mut user_dict = UserDictionary::new();
+        user_dict.record("かんじ", "感じ");
+        ConversionEngine::new_with_user_dict(Some(dict), Some(user_dict))
+    }
+
+    #[test]
+    fn user_dict_candidates_first() {
+        let mut engine = test_engine_with_user_dict();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        let output = engine.process(EngineCommand::Convert);
+        // ユーザー辞書の "感じ" が先頭
+        assert_eq!(output.display, "感じ");
+        let candidates = engine.candidates().unwrap();
+        assert_eq!(candidates[0], "感じ");
+        assert!(candidates.contains(&"漢字".to_string()));
+        assert!(candidates.contains(&"幹事".to_string()));
+    }
+
+    #[test]
+    fn user_dict_no_duplicate() {
+        let mut engine = test_engine_with_user_dict();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::Convert);
+        let candidates = engine.candidates().unwrap();
+        // "感じ" が重複していないこと
+        let count = candidates.iter().filter(|c| c.as_str() == "感じ").count();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn commit_records_to_user_dict() {
+        let dict = Dictionary::load_from_file(Path::new("tests/fixtures/test_dict.txt")).unwrap();
+        let user_dict = UserDictionary::new();
+        let mut engine = ConversionEngine::new_with_user_dict(Some(dict), Some(user_dict));
+
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::Convert);
+        engine.process(EngineCommand::NextCandidate); // → "感じ"
+        engine.process(EngineCommand::Commit);
+
+        // 2回目: ユーザー辞書の学習で "感じ" が先頭になる
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        let output = engine.process(EngineCommand::Convert);
+        assert_eq!(output.display, "感じ");
+    }
+
+    #[test]
+    fn engine_without_user_dict_unchanged() {
+        // ユーザー辞書なしの場合は既存の動作と同じ
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        let output = engine.process(EngineCommand::Convert);
+        assert_eq!(output.display, "漢字");
+    }
+
+    #[test]
+    fn user_dict_only_no_system_dict() {
+        let mut user_dict = UserDictionary::new();
+        user_dict.record("かんじ", "感じ");
+        let mut engine = ConversionEngine::new_with_user_dict(None, Some(user_dict));
+
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        let output = engine.process(EngineCommand::Convert);
+        assert_eq!(output.display, "感じ");
+        let candidates = engine.candidates().unwrap();
+        assert_eq!(candidates, &["感じ"]);
     }
 }

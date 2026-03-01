@@ -20,14 +20,16 @@ japinput/
 │   ├── katakana.rs    # ひらがな → カタカナ変換
 │   ├── input_state.rs # 入力状態管理 (逐次入力、backspace)
 │   ├── dictionary.rs  # SKK 辞書読み込み・検索
+│   ├── user_dictionary.rs # ユーザー辞書管理（学習・永続化）
 │   ├── candidate.rs   # 変換候補リスト管理
-│   ├── engine.rs      # 変換エンジン (状態機械・コマンド処理)
-│   ├── key_mapping.rs # VirtualKey → EngineCommand 変換
+│   ├── engine.rs      # 変換エンジン (状態機械・コマンド処理・ユーザー辞書連携)
+│   ├── key_mapping.rs # VirtualKey → EngineCommand 変換 (Ctrl+キー プリセット対応)
+│   ├── config.rs      # 設定ファイルのパース・デフォルト値 (keybind_preset 含む)
 │   ├── guids.rs       # CLSID, Profile GUID 定義
-│   ├── text_service.rs    # TSF TextService (Windows 専用)
+│   ├── text_service.rs    # TSF TextService (Windows 専用、設定・ユーザー辞書連携)
 │   ├── class_factory.rs   # COM ClassFactory (Windows 専用)
 │   ├── registry.rs        # COM/TSF レジストリ登録 (Windows 専用)
-│   └── main.rs        # CLI デモ (変換エンジン対応)
+│   └── main.rs        # CLI デモ (変換エンジン対応、--user-dict オプション)
 ├── tests/
 │   └── fixtures/
 │       └── test_dict.txt  # テスト用 SKK 辞書
@@ -59,6 +61,8 @@ cargo build
 | `cargo fmt` | コードをフォーマットする |
 | `cargo fmt -- --check` | フォーマット差分があるかチェックする（CI向け） |
 | `cargo run` | CLI デモを起動する（ローマ字→かな変換） |
+| `cargo run -- --dict <path>` | 辞書指定で CLI デモを起動する |
+| `cargo run -- --dict <path> --user-dict <path>` | 辞書・ユーザー辞書指定で CLI デモを起動する |
 | `cargo build --release` | リリースビルド（Windows DLL 生成） |
 
 ## Windows IME インストール

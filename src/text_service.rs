@@ -10,9 +10,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
 use windows::Win32::UI::TextServices::*;
 use windows::core::*;
 
+use crate::config::Config;
 use crate::dictionary::Dictionary;
 use crate::engine::{ConversionEngine, EngineOutput};
 use crate::key_mapping::{self, CtrlKeyConfig, Modifiers};
+use crate::user_dictionary::UserDictionary;
 
 // === EditSession ===
 
@@ -131,14 +133,34 @@ pub struct TextService {
 
 impl TextService {
     pub fn new() -> Self {
-        let dict = Self::load_default_dict();
+        // 設定ファイルの読み込み
+        let config_path = get_appdata_path("config.toml");
+        let config = Config::load(&config_path).unwrap_or_else(|_| Config::default_config());
+
+        // システム辞書の読み込み
+        let dict = if let Some(ref path) = config.system_dict_path {
+            Dictionary::load_from_file(std::path::Path::new(path)).ok()
+        } else {
+            Self::load_default_dict()
+        };
+
+        // ユーザー辞書の読み込み
+        let user_dict_path = get_appdata_path("user_dict.txt");
+        let user_dict = if config.auto_learn {
+            UserDictionary::load(&user_dict_path).ok()
+        } else {
+            None
+        };
+
+        let ctrl_config = config.keybind.clone();
+
         Self {
             thread_mgr: Mutex::new(None),
             client_id: Mutex::new(0),
-            engine: Mutex::new(ConversionEngine::new(dict)),
+            engine: Mutex::new(ConversionEngine::new_with_user_dict(dict, user_dict)),
             ime_on: Mutex::new(false),
             composition: Arc::new(Mutex::new(None)),
-            ctrl_config: CtrlKeyConfig::default(),
+            ctrl_config,
         }
     }
 
@@ -240,6 +262,16 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
             }
         }
 
+        // ユーザー辞書の保存
+        let mut engine = self.engine.lock().unwrap();
+        if let Some(ud) = engine.user_dict_mut() {
+            if ud.is_dirty() {
+                let path = get_appdata_path("user_dict.txt");
+                let _ = ud.save(&path);
+            }
+        }
+        drop(engine);
+
         *self.ime_on.lock().unwrap() = false;
         // EditSession なしでは EndComposition(ec) を呼べないため、参照のみ解放する。
         // TSF は TIP の Deactivate 時にアクティブな Composition を自動終了する。
@@ -315,6 +347,14 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
     fn OnKeyUp(&self, _pic: Option<&ITfContext>, _wparam: WPARAM, _lparam: LPARAM) -> Result<BOOL> {
         Ok(FALSE)
     }
+}
+
+/// %APPDATA%\japinput\ 以下のパスを返す。
+fn get_appdata_path(filename: &str) -> std::path::PathBuf {
+    let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(appdata)
+        .join("japinput")
+        .join(filename)
 }
 
 /// キーボードの現在の修飾キー状態を取得する。
